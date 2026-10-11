@@ -1,0 +1,15 @@
+/*
+ * config.js: הגדרות שמשתנות בין סביבות.
+ *
+ * googleClientId: מזהה לקוח OAuth מסוג "Web application" מ-Google Cloud Console.
+ * זה לא סוד (הוא מופיע בכל דף שמשתמש בהתחברות של גוגל), אבל גוגל תקבל אותו רק מהכתובות
+ * שהוגדרו לו ב-"Authorized JavaScript origins". הוראות מלאות: GOOGLE-CALENDAR-SETUP.md
+ * כל עוד השדה ריק, הדמו עובד עם יומן מדומה בזיכרון, והמיילים רק מוצגים.
+ *
+ * liveEmail: false = מצב בדיקה. כל מייל נשלח רק לחשבון המחובר, והנמען המקורי כתוב בנושא.
+ *            true  = המיילים נשלחים ללקוחות ולסטודנטים עצמם. להפעיל רק עם נתונים אמיתיים.
+ */
+window.TAMIMA_CONFIG = {
+  googleClientId: '329242531588-mbv6kie5i8l05p83o4dcdijgcqs0p4tv.apps.googleusercontent.com',
+  liveEmail: false
+};

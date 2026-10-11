@@ -1,0 +1,10 @@
+# סודות ונתוני השרת: לא עולים לשום מקום
+server/.env
+server/data/
+
+# כלים מקומיים לתצוגה במחשב
+.claude/
+
+# קבצים מלפני הפיצול לדפים נפרדים (הוחלפו ב-core.js, site.js, studio.js, student.js, demo.js, boot.js ו-demo.html)
+app.js
+phone.html

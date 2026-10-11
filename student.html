@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!--
+    מדיניות אבטחת תוכן (CSP): הדפדפן מריץ קוד רק מהאתר עצמו ומחלון ההתחברות של גוגל,
+    ומתחבר רק ל-Google Calendar API. אין סקריפטים מוטבעים ואין eval.
+    style-src כולל 'unsafe-inline' רק בגלל מאפייני style של מיקום פריטים ביומן.
+    כותרות שאי אפשר להגדיר ב-meta (frame-ancestors, HSTS) מפורטות במסך "תאימות ואבטחה".
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <title>האזור האישי | הסטודיו של תמימה</title>
+  <meta name="description" content="האזור האישי של סטודנט בסטודיו.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <meta name="theme-color" content="#221b16">
+  <link rel="preload" as="image" href="img/hands-clay.jpg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-app="student">
+  <a class="skip-link" href="#main">דלג לתוכן הראשי</a>
+  <div id="layout">
+    <div id="app"></div>
+  </div>
+  <div id="sheet"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="config.js"></script>
+  <script src="gcal.js"></script>
+  <script src="data.js"></script>
+  <script src="core.js"></script>
+  <script src="student.js"></script>
+  <script src="boot.js"></script>
+</body>
+</html>

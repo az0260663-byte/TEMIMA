@@ -1,0 +1,181 @@
+/* student.js: האזור האישי של סטודנט בלבד (נפתח מהקישור האישי במייל). */
+'use strict';
+
+  /* ================= אזור 3: סטודנט ================= */
+  function studentView(r) {
+    const page = r.page || 'home';
+    const s = me();
+    if (!s && PORTAL) return `<div class="appshell student">
+      ${appHead('plate-apron', 'הסטודיו של תמימה', 'האזור האישי')}
+      <main id="main" tabindex="-1" class="wrap"><h1 class="sr-only">האזור האישי</h1>
+        ${ui.portalWait ? card('<p class="center">טוען את האזור האישי...</p>')
+          : card(`<h2>הקישור לא זמין</h2><p>הקישור לא תקין, או שפג תוקפו. אפשר לבקש מתמימה קישור חדש.</p>
+            <p class="muted small">בדמו: הקישור האישי עובד כשהדמו פתוח באותו דפדפן, בלשונית אחרת.</p>`)}
+      </main></div>`;
+    if (!s) return `<div class="appshell student">
+      ${appHead('plate-apron', 'אפליקציית הסטודנט', 'כאן כל סטודנט רואה את השיעורים, הכרטיסייה והתשלומים שלו')}
+      <main id="main" tabindex="-1" class="wrap"><h1 class="sr-only">אפליקציית הסטודנט</h1>
+        ${card(`<h2>עדיין אין סטודנטים</h2>
+          <p>ברגע שנוסף סטודנט, האפליקציה שלו מופיעה כאן.</p>
+          <ul class="doc-list"><li>תמימה מוסיפה סטודנט: "תמימה", ואז "חוגים", "סטודנטים", ו"+ סטודנט".</li><li>או שמישהו משאיר פרטים לקורס באתר, ותמימה מוסיפה אותו מ"ממתין לך עכשיו".</li></ul>
+          <a class="btn primary block" href="#/tamima/classes">לחוגים של תמימה</a>`)}
+      </main></div>`;
+    const actives = S.students.filter(x => x.active !== false);
+    const pick = !PORTAL && actives.length > 1 ? `<label class="me-pick"><span class="sr-only">צפייה באפליקציה של</span><select data-me>${actives.map(x => `<option value="${x.id}" ${x.id === s.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>` : '';
+    const nav = appNav('student', page === 'makeup' || page === 'pay' ? (page === 'pay' ? 'payments' : 'lessons') : page, [['home', 'בית'], ['lessons', 'שיעורים'], ['payments', 'תשלומים']]);
+    const views = { home: sHome, lessons: sLessons, payments: sPayments, makeup: sMakeup, pay: sPay };
+    const body = (views[page] || sHome)(r.param);
+    const msg = ui.stuMsg ? `<div class="flash" role="status"><span>${ui.stuMsg}</span><button class="x-btn" data-act="flashClose" aria-label="סגירת ההודעה">×</button></div>` : '';
+    return `<div class="appshell student">
+      ${appHead({ home: 'plate-apron', lessons: 'bowls-lap', payments: 'cups-grass', makeup: 'bowls-raise', pay: 'cups-grass' }[page] || 'plate-apron', `שלום ${first(s)}`, `${group(s.groupId).name} · ${group(s.groupId).start} עד ${group(s.groupId).end}`, pick)}
+      ${nav}<main id="main" tabindex="-1" class="wrap">${msg}${body}</main></div>`;
+  }
+
+  function stuPayCard(s) {
+    const ps = payStatus(s);
+    if (ps.key === 'requested' || ps.key === 'overdue') {
+      return card(`<div class="row-between"><h2>תשלום</h2>${chip(ps.key === 'overdue' || s.firstDue ? 'ממתין לתשלום' : 'נשלחה דרישת תשלום', ps.key)}</div>
+        <p>${s.owes ? (s.firstDue ? 'הכרטיסייה הראשונה' : 'הכרטיסייה הנוכחית') : 'הכרטיסייה הבאה'} (${money(S.settings.cardPrice)}) מחכה לתשלום.</p>
+        <a class="btn primary block" href="#/student/pay">תשלום בסאמיט</a>`);
+    }
+    return card(`<div class="row-between"><h2>תשלום</h2>${chip(ps.key === 'paid' ? 'הכרטיסייה הבאה שולמה' : 'הכרטיסייה שולמה', 'paid')}</div>
+      <p class="muted small">הכרטיסייה הבאה תישלח לתשלום אחרי השיעור השלישי.</p>`);
+  }
+
+  function sHome() {
+    const s = me();
+    const up = studentUpcoming(s).filter(x => !x.l.cancelled && (x.kind === 'makeup' || !x.st));
+    const nx = up[0];
+    const cr = openCredits(s);
+    return `<h1 class="sr-only">בית</h1>${card(nx ? `<small class="eyebrow">השיעור הבא</small>
+        <h2 class="big">${longDay(nx.l.date)}</h2>
+        <p>${group(nx.l.groupId).start} עד ${group(nx.l.groupId).end} · ${nx.kind === 'makeup' ? 'השלמה ב' + group(nx.l.groupId).name : group(nx.l.groupId).name}</p>
+        <button class="btn ghost small" data-act="stuLesson" data-l="${nx.l.id}">פרטים וביטול</button>` : empty('אין שיעורים קרובים.'), 'hero-card')}
+      ${card(`<div class="row-between"><h2>כרטיסייה</h2><b>${s.used}/${S.settings.cardSize}</b></div>${punchDots(s)}<p class="muted small">נוצלו ${s.used} מתוך ${S.settings.cardSize} שיעורים.</p>`)}
+      ${card(`<div class="row-between"><h2>השלמות זמינות</h2><b>${cr.length}</b></div>
+        ${cr.length ? cr.map(m => `<p class="small">בתוקף עד ${dmy(m.expires)}</p><a class="btn primary block" href="#/student/makeup/${m.id}">קביעת השלמה</a>`).join('') : '<p class="muted small">ביטול עד 24 שעות לפני שיעור מזכה בהשלמה, פעם בחודש.</p>'}`)}
+      ${stuPayCard(s)}`;
+  }
+
+  function sLessons() {
+    const s = me();
+    const list = studentUpcoming(s);
+    const cr = openCredits(s);
+    const row = x => {
+      const g = group(x.l.groupId);
+      let st;
+      if (x.l.cancelled) st = chip('בוטל על ידי הסטודיו', 'muted');
+      else if (x.kind === 'makeup') st = chip('השלמה', 'site');
+      else if (x.st === 'cancelled') st = chip('בוטל', 'muted');
+      else if (x.st === 'late') st = chip('ביטול מאוחר', 'overdue');
+      else if (x.st === 'arrived') st = chip('נוכחות סומנה', 'paid');
+      else st = chip('מתוכנן', 'ok');
+      return `<button class="ws-row" data-act="stuLesson" data-l="${x.l.id}"><span class="dot dot-${x.kind === 'makeup' ? 'site' : 'class'}"></span>
+        <div><b>${longDay(x.l.date)}</b><small>${g.start} עד ${g.end} · ${g.name}</small></div>${st}</button>`;
+    };
+    return `<h1>השיעורים שלי</h1>
+      ${cr.length ? card(`<h2>יש לך ${cr.length === 1 ? 'השלמה אחת' : cr.length + ' השלמות'} לקבוע</h2>${cr.map(m => `<a class="btn primary block" href="#/student/makeup/${m.id}">קביעת השלמה, בתוקף עד ${dmy(m.expires)}</a>`).join('')}`, 'accent') : ''}
+      ${card(list.map(row).join('') || empty('אין שיעורים קרובים.'))}
+      <p class="muted small">ביטול עד 24 שעות לפני השיעור מזכה בהשלמה (אחת בחודש). ביטול מאוחר יותר נספר כשיעור שנוצל.</p>`;
+  }
+
+  function sMakeup(mid) {
+    const s = me();
+    const m = S.makeups.find(x => x.id === mid && x.studentId === s.id && !x.bookedLessonId);
+    if (!m) return `<a class="back" href="#/student/lessons">חזרה</a>${card(empty('ההשלמה כבר נקבעה או שאינה זמינה.'))}`;
+    const opts = makeupOptions(s, m);
+    return `<a class="back" href="#/student/lessons">חזרה</a><h1>קביעת השלמה</h1>
+      <p class="muted">שיעורים בקבוצות אחרות שיש בהן מקום, עד ${dmy(m.expires)}.</p>
+      ${card(opts.length ? opts.map(l => {
+        const g = group(l.groupId); const f = roster(l).free;
+        return `<button class="ws-row" data-act="pickMakeup" data-m="${m.id}" data-l="${l.id}"><span class="dot dot-class"></span>
+          <div><b>${longDay(l.date)}</b><small>${g.start} עד ${g.end} · ${g.name}</small></div>${chip(f === 1 ? 'נשאר מקום אחד' : `נשארו ${f} מקומות`, f === 1 ? 'requested' : 'ok')}</button>`;
+      }).join('') : empty('אין כרגע מקום פנוי בקבוצות האחרות עד תום תוקף ההשלמה.'))}`;
+  }
+
+  function sPayments() {
+    const s = me();
+    const hist = S.payments.filter(p => p.studentId === s.id).sort((a, b) => b.date.localeCompare(a.date));
+    return `<h1>תשלומים</h1>
+      ${stuPayCard(s)}
+      ${card(`<h2>היסטוריה</h2>${hist.map(p => `<button class="ws-row" data-act="stuInvoice" data-id="${p.id}"><span class="dot dot-paid"></span>
+        <div><b>כרטיסייה, 4 שיעורים</b><small>${dmy(p.date)}.${parse(p.date).getFullYear()} · ${money(p.amount)}</small></div><span class="go">חשבונית מס קבלה</span></button>${refundLines(p.invoice)}`).join('') || empty('אין תשלומים עדיין.')}`)}
+      <p class="muted small">התשלום מתבצע בכרטיס אשראי, בקישור מאובטח של סאמיט.</p>`;
+  }
+
+  function sPay() {
+    const s = me();
+    const ps = payStatus(s);
+    if (ps.key !== 'requested' && ps.key !== 'overdue') return `<a class="back" href="#/student/payments">חזרה</a>${card(empty('אין כרגע תשלום פתוח.'))}`;
+    return '<h1 class="sr-only">תשלום</h1>' + sumitView(S.settings.cardPrice, 'כרטיסייה, 4 שיעורים', 'stuPay', 'stuPayBack');
+  }
+
+  Object.assign(A, {
+    // סטודנט
+    stuLesson(d) {
+      openSheet(() => {
+        const s = me(); const l = lesson(d.l); const g = group(l.groupId);
+        const mk = S.makeups.find(m => m.studentId === s.id && m.bookedLessonId === l.id);
+        const st = att(l.id).rec[s.id];
+        let html = `<h2>${mk ? 'השלמה, ' : ''}${g.name}</h2><p class="muted">${longDay(l.date)}, ${g.start} עד ${g.end}</p>`;
+        if (mk) {
+          const hrs = (lStart(l) - now()) / 36e5;
+          html += hrs >= S.settings.lessonCancelHours
+            ? `<div class="policy">ביטול ההשלמה יחזיר לך אותה, ואפשר יהיה לקבוע מועד אחר עד ${dmy(mk.expires)}.</div><button class="btn primary block" data-act="cancelMakeup" data-id="${mk.id}">ביטול ההשלמה</button>`
+            : `<div class="policy warn">פחות מ-24 שעות לפני השיעור אי אפשר לבטל השלמה.</div>`;
+        } else if (st === 'cancelled') html += `<p>${chip('בוטל', 'muted')} ביטלת את השיעור הזה.</p>`;
+        else if (st === 'late') html += `<p>${chip('ביטול מאוחר', 'overdue')} השיעור נספר כשיעור שנוצל.</p>`;
+        else if (st === 'arrived') html += `<p>${chip('נוכחות סומנה', 'paid')} תמימה סימנה שהגעת לשיעור.</p>`;
+        else {
+          const ci = cancelInfo(s, l);
+          if (!ci.ok) html += `<p class="muted">השיעור כבר התחיל.</p>`;
+          else {
+            html += ci.late
+              ? `<div class="policy warn"><b>ביטול מאוחר</b>השיעור מתחיל בעוד פחות מ-24 שעות. הביטול ייחשב כשיעור שנוצל מהכרטיסייה, ולא תהיה השלמה.</div>`
+              : ci.credit
+                ? `<div class="policy"><b>ביטול בזמן</b>תקבלי השלמה שאפשר לקבוע בקבוצה אחרת שיש בה מקום, עד ${dmy(iso(addMonths(startOfToday(), 1)))}.</div>`
+                : `<div class="policy warn"><b>ביטול בזמן, ללא השלמה</b>כבר קיבלת השלמה החודש. אפשר לבטל, אבל הביטול הזה לא מזכה בהשלמה נוספת.</div>`;
+            html += `<button class="btn ${ci.late ? 'danger' : 'primary'} block" data-act="stuCancel" data-l="${l.id}">אישור ביטול</button><button class="btn ghost block" data-act="closeSheet">השארת השיעור</button>`;
+          }
+        }
+        return html;
+      });
+    },
+    stuCancel(d) {
+      const s = me(); const l = lesson(d.l); const ci = cancelInfo(s, l);
+      if (!ci.ok) return;
+      const a = att(l.id);
+      if (ci.late) { a.rec[s.id] = 'late'; useLesson(s); ui.stuMsg = 'השיעור בוטל. הביטול נספר כשיעור שנוצל.'; }
+      else { a.rec[s.id] = 'cancelled'; if (ci.credit) { grantCredit(s, l); ui.stuMsg = 'השיעור בוטל, וקיבלת השלמה. אפשר לקבוע אותה עכשיו.'; } else ui.stuMsg = 'השיעור בוטל. הביטול לא מזכה בהשלמה החודש.'; }
+      email('lessonCancelledByStudent', toStudent(s), `ביטלת את השיעור ב${shortDay(l.date)}`, [`היי ${first(s)},`, `השיעור ב${longDay(l.date)} בוטל.`, ci.late ? 'הביטול היה פחות מ-24 שעות לפני, ולכן השיעור נספר בכרטיסייה.' : ci.credit ? 'קיבלת השלמה, שאפשר לקבוע בקבוצה אחרת במשך חודש.' : 'השיעור לא נספר בכרטיסייה. החודש כבר נוצלה השלמה.'], ci.credit ? { cta: ['לקביעת השלמה', studentUrl(s, 'lessons')] } : {});
+      log('notify', `ביטול שיעור: ${s.name}`, `${group(l.groupId).name}, ${shortDay(l.date)}. ${ci.late ? 'ביטול מאוחר, נספר בכרטיסייה.' : ci.credit ? 'ביטול בזמן, נוצרה השלמה.' : 'ביטול בזמן, ללא השלמה.'} מסומן ברשימת הנוכחות.`);
+      closeSheet(); render(); flashClear();
+    },
+    cancelMakeup(d) {
+      const m = S.makeups.find(x => x.id === d.id); const l = lesson(m.bookedLessonId);
+      m.bookedLessonId = null;
+      log('notify', `ביטול השלמה: ${me().name}`, `${group(l.groupId).name}, ${shortDay(l.date)}. המקום התפנה.`);
+      ui.stuMsg = 'ההשלמה בוטלה ואפשר לקבוע אותה מחדש.';
+      closeSheet(); render(); flashClear();
+    },
+    pickMakeup(d) {
+      const l = lesson(d.l); const g = group(l.groupId);
+      openSheet(() => `<h2>השלמה ב${g.name}</h2><p class="muted">${longDay(l.date)}, ${g.start} עד ${g.end}</p>
+        <p>${roster(l).free === 1 ? 'נשאר מקום אחד.' : `נשארו ${roster(l).free} מקומות.`}</p>
+        <button class="btn primary block" data-act="bookMakeup" data-m="${d.m}" data-l="${l.id}">קביעת ההשלמה</button>`);
+    },
+    bookMakeup(d) {
+      const m = S.makeups.find(x => x.id === d.m); const l = lesson(d.l);
+      if (roster(l).free < 1) return;
+      m.bookedLessonId = l.id;
+      log('notify', `${me().name} קבעה השלמה`, `${group(l.groupId).name}, ${shortDay(l.date)}. נוספה לרשימת הנוכחות של השיעור.`);
+      ui.stuMsg = `ההשלמה נקבעה ל${longDay(l.date)} ב${group(l.groupId).name}.`;
+      closeSheet(); location.hash = '#/student/lessons'; flashClear();
+    },
+    stuPay() { const inv = payCard(me()); ui.stuMsg = `התשלום התקבל. חשבונית מס קבלה מס׳ ${inv} נשלחה למייל.`; location.hash = '#/student/payments'; flashClear(); },
+    stuPayBack() { history.back(); },
+    stuInvoice(d) {
+      const p = S.payments.find(x => x.id === d.id);
+      openSheet(() => invoiceDoc(p.invoice, me().name, 'כרטיסייה, 4 שיעורים', p.amount, p.date) + refundLines(p.invoice));
+    }
+  });
