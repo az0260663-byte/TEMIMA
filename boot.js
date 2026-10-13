@@ -101,7 +101,7 @@
     // חיפוש שמתעדכן בזמן ההקלדה, בלי לאבד את מיקום הסמן
     if (e.target.dataset.live === 'page') { const pos = e.target.selectionStart; render(); const el = document.querySelector(`[data-bind="${b}"]`); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch (err) { /* סוג שדה בלי סמן */ } } }
   });
-  function bindRoot(root) { return { bk, lead, rcpt: ui.rcpt, chf: ui.chf, accForm: ui.accForm, nsf: ui.nsf, gsChoice: ui.gsChoice, stf: ui.stf, gf: ui.gf, wsf: ui.wsf, mvf: ui.mvf, bf: ui.bf, stq: ui.stq, cf: ui.cf, rf: ui.rf }[root]; }
+  function bindRoot(root) { return { bk, lead, rcpt: ui.rcpt, chf: ui.chf, accForm: ui.accForm, nsf: ui.nsf, gsChoice: ui.gsChoice, stf: ui.stf, gf: ui.gf, wsf: ui.wsf, mvf: ui.mvf, bf: ui.bf, stq: ui.stq, cf: ui.cf, rf: ui.rf, cq: (ui.cq = ui.cq || { q: '' }) }[root]; }
   document.addEventListener('change', e => {
     if (e.target.matches('select[data-me]')) { ui.meId = e.target.value; render(); return; }
     const k = e.target.dataset.setting;

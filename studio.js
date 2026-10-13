@@ -713,6 +713,7 @@
       if (paid && !(used >= 0 && used <= S.settings.cardSize)) return ['used', `מספר השיעורים שנוצלו צריך להיות בין 0 ל-${S.settings.cardSize}.`];
       const n = { id: `st${S.seq++}`, name, phone: f.phone.trim(), email: (f.email || '').trim(), groupId: g.id, k: token(), used, nextPaid: false, requestSent: !paid, owes: !paid, firstDue: !paid, reminded: null, active: true, notes: f.notes || '', joined: todayIso(), start: f.start };
       S.students.push(n);
+      { const cu = (S.customers || []).find(x => x.phones.includes(normPhone(n.phone))); if (cu) cu.studentId = n.id; }
       const intro = [`היי ${first(n)},`, `שמחים שהצטרפת. הקבוצה נפגשת ביום ${DAYS[g.day]}, ${g.start} עד ${g.end}.`, `השיעור הראשון: ${longDay(n.start)}.`, `הכתובת: ${S.content.address}.`];
       if (paid) email('welcome', toStudent(n), `ברוכים הבאים ל${g.name}!`, intro.concat('השיעורים, הכרטיסייה והתשלומים שלך נמצאים באפליקציה.'), { cta: ['לאפליקציה שלי', studentUrl(n, 'home')] });
       else email('welcome', toStudent(n), `ברוכים הבאים ל${g.name}!`, intro.concat(`לתשלום הכרטיסייה הראשונה (${money(S.settings.cardPrice)}, 4 שיעורים) בכרטיס אשראי, בקישור המאובטח:`, 'אחרי התשלום יישלח אליך קישור לאזור האישי, עם השיעורים, הכרטיסייה וההשלמות.'), { cta: ['לתשלום הכרטיסייה', studentUrl(n, 'pay')] });
@@ -1260,26 +1261,60 @@
       ${ui.wsTab === 'customers' ? customersCard(custs) : card(list.length ? list.map(wsRow).join('') : empty('אין סדנאות.'))}`;
   }
 
-  // לקוחות: כל מי שהזמין סדנה, עם הסדנאות והקבלות שלו
+  /* ---------- לקוחות ----------
+     רשימה עם חיפוש לפי שם או טלפון. לחיצה פותחת את כרטיס הלקוח כחלונית. */
+  const fmtPhone = d => (d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3)}` : d);
+  // זוגות של "אולי זה אותו לקוח?" (אותו מייל, טלפון אחר), כל זוג פעם אחת
+  function twinPairs() {
+    const seen = new Set(), out = [];
+    (S.customers || []).forEach(c => mergeCandidates(c).forEach(o => { const k = [c.id, o.id].sort().join('|'); if (!seen.has(k)) { seen.add(k); out.push([c, o]); } }));
+    return out;
+  }
+  const twinRow = (c, o) => `<div class="todo"><div class="todo-main">${chip('אולי זה אותו לקוח?', 'requested')}<b>${esc(c.name)} ו${esc(o.name)}</b><small>אותו מייל (${esc(c.email)}), טלפונים שונים: <span dir="ltr">${c.phones.map(fmtPhone).join(', ')}</span> ו-<span dir="ltr">${o.phones.map(fmtPhone).join(', ')}</span></small></div>
+      <div class="btn-row"><button class="btn small primary" data-act="custMergeAsk" data-keep="${c.id}" data-drop="${o.id}">איחוד</button><button class="btn small ghost" data-act="custNotSame" data-a="${c.id}" data-b="${o.id}">לא אותו לקוח</button></div></div>`;
   function customersCard(custs) {
-    const rows = custs.map(c => ({ c, ws: customerWorkshops(c.id) })).sort((a, b) => ((b.ws[0] || {}).date || '').localeCompare((a.ws[0] || {}).date || ''));
-    return card(rows.length ? rows.map(({ c, ws }) => {
-      const paid = ws.filter(w => w.status !== 'cancelled').reduce((a, w) => a + w.amount, 0);
-      return `<button class="ws-row" data-act="customerSheet" data-id="${c.id}"><span class="dot dot-site"></span>
-        <div><b>${esc(c.name)}</b><small>${ws.length === 1 ? 'סדנה אחת' : `${ws.length} סדנאות`} · ${money(paid)}${ws[0] ? ` · אחרונה: ${shortDay(ws[0].date)}` : ''}</small></div></button>`;
-    }).join('') : empty('עדיין אין לקוחות. כל מי שמזמין סדנה נכנס לכאן אוטומטית.'));
+    const q = String((ui.cq || {}).q || '').trim().toLowerCase(), qd = q.replace(/\D/g, '');
+    const match = c => !q || c.name.toLowerCase().includes(q) || (qd.length >= 3 && c.phones.some(p => p.includes(qd)));
+    const rows = custs.filter(match).map(c => ({ c, ws: customerWorkshops(c.id) })).sort((x, y) => ((y.ws[0] || {}).date || '').localeCompare((x.ws[0] || {}).date || ''));
+    const twins = twinPairs();
+    return (twins.length ? card(`<h2>אולי זה אותו לקוח?</h2>${twins.map(([c, o]) => twinRow(c, o)).join('')}`) : '') + card(`
+      <label class="field"><span>חיפוש לפי שם או טלפון</span><input type="search" data-bind="cq.q" data-live="page" value="${esc((ui.cq || {}).q || '')}" placeholder="למשל: דנה, או 050"></label>
+      ${rows.length ? rows.map(({ c, ws }) => {
+        const paid = ws.filter(w => w.status !== 'cancelled').reduce((s, w) => s + w.amount, 0);
+        return `<button class="ws-row" data-act="customerSheet" data-id="${c.id}"><span class="dot dot-site"></span>
+          <div><b>${esc(c.name)}</b><small><span dir="ltr">${c.phones.map(fmtPhone).join(', ')}</span> · ${ws.length === 1 ? 'הזמנה אחת' : `${ws.length} הזמנות`} · ${money(paid)}</small>
+          <span class="srow-meta">${c.studentId && student(c.studentId) ? chip('גם סטודנט', 'class') : ''}${c.lateMoveUsed ? chip('הזזה חד פעמית נוצלה', 'muted') : ''}</span></div></button>`;
+      }).join('') : empty(q ? 'לא נמצא לקוח כזה.' : 'עדיין אין לקוחות. כל מי שמזמין סדנה נכנס לכאן אוטומטית.')}`);
   }
   function customerSheetHtml(id) {
-    const c = (S.customers || []).find(x => x.id === id);
+    const c = customer(id);
     if (!c) return '';
     const ws = customerWorkshops(c.id);
-    const receipts = ws.filter(w => w.invoice && (w.receipt === 'auto' || w.receipt === 'manual'));
+    const inv = ws.filter(w => w.invoice);
+    const stu = c.studentId && student(c.studentId);
+    const twins = mergeCandidates(c);
     return `<h2>${esc(c.name)}</h2><p class="muted">לקוח מאז ${dmy(c.since)}.${parse(c.since).getFullYear()}</p>
-      <dl class="kv"><dt>טלפון</dt><dd dir="ltr">${esc(c.phone || '')}</dd><dt>מייל</dt><dd dir="ltr">${esc(c.email || '')}</dd></dl>
-      <h3>סדנאות</h3>${ws.map(w => `<button class="ws-row" data-act="wsSheet" data-id="${w.id}"><span class="dot dot-${srcCss(w)}"></span>
-        <div><b>${longDay(w.date)}, ${w.time}</b><small>${w.n} משתתפים · ${money(w.amount)} · ${isOwn(w) ? 'מהאתר' : esc(chName(w.source))}</small></div>${w.status === 'cancelled' ? chip('בוטלה', 'muted') : ''}</button>`).join('') || empty('אין סדנאות.')}
-      <h3>קבלות</h3>${receipts.map(w => `<details class="cust-rcpt"><summary>חשבונית מס קבלה מס׳ ${w.invoice} · ${money(w.amount)}</summary>
-        ${invoiceDoc(w.invoice, c.name, `סדנת קרמיקה, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}`, w.amount, w.paidAt || w.date)}</details>${refundLines(w.invoice)}`).join('') || empty('אין קבלות עדיין.')}`;
+      ${twins.map(o => twinRow(c, o)).join('')}
+      <dl class="kv"><dt>טלפון</dt><dd dir="ltr">${c.phones.map(fmtPhone).join(', ') || 'לא נמסר'}</dd><dt>מייל</dt><dd dir="ltr">${esc(c.email || 'לא נמסר')}</dd>
+        <dt>הזזה חד פעמית</dt><dd>${c.lateMoveUsed ? `נוצלה (${dmy(c.lateMoveUsed)}.${parse(c.lateMoveUsed).getFullYear()})` : 'זמינה'}</dd>
+        ${stu ? `<dt>סטודנט</dt><dd><a href="#/tamima/student/${stu.id}" data-act="closeSheet">${esc(stu.name)}, ${esc(group(stu.groupId).name)}</a></dd>` : ''}</dl>
+      <h3>הזמנות</h3>${ws.map(w => `<button class="ws-row" data-act="wsSheet" data-id="${w.id}"><span class="dot dot-${srcCss(w)}"></span>
+        <div><b>${longDay(w.date)}, ${w.time}</b><small>${w.n} משתתפים · ${money(w.amount)} · ${isOwn(w) ? 'מהאתר' : esc(chName(w.source))}</small></div>${w.status === 'cancelled' ? chip('בוטלה', 'muted') : ''}</button>`).join('') || empty('אין הזמנות.')}
+      <h3>חשבוניות</h3>${inv.map(w => `<div class="pay-row"><span>חשבונית מס קבלה מס׳ ${w.invoice} · ${money(w.amount)} · ${shortDay(w.date)}</span>
+        <div class="btn-row">${pdfBtn(w.invoice)}${isOwn(w) && refundable(w.invoice) ? `<button class="btn ghost small" data-act="refundOpen" data-inv="${w.invoice}">זיכוי</button>` : ''}</div>${refundLines(w.invoice)}</div>`).join('') || empty('אין חשבוניות עדיין.')}
+      ${(S.customers || []).length > 1 ? `<button class="btn ghost block" data-act="custMergePick" data-id="${c.id}">איחוד עם לקוח אחר</button>` : ''}`;
+  }
+  function mergePreviewHtml(keepId, dropId) {
+    const k = customer(keepId), d = customer(dropId);
+    if (!k || !d) return '';
+    const ws = customerWorkshops(d.id), inv = ws.filter(w => w.invoice);
+    return `<h2>איחוד כרטיסי לקוח</h2><p>הכרטיס של <b>${esc(d.name)}</b> יתאחד לתוך הכרטיס של <b>${esc(k.name)}</b>.</p>
+      <ul class="doc-list">
+        <li>${ws.length === 1 ? 'הזמנה אחת עוברת' : `${ws.length} הזמנות עוברות`}, ו${inv.length === 1 ? 'חשבונית אחת' : `${inv.length} חשבוניות`}.</li>
+        <li>הטלפונים שיישמרו: <span dir="ltr">${[...new Set(k.phones.concat(d.phones))].map(fmtPhone).join(', ')}</span></li>
+        ${k.lateMoveUsed || d.lateMoveUsed ? `<li>הזזה חד פעמית: נוצלה (${dmy([k.lateMoveUsed, d.lateMoveUsed].filter(Boolean).sort().pop())}). זה עובר לכרטיס המאוחד.</li>` : ''}
+      </ul>
+      <div class="btn-row"><button class="btn primary" data-act="custMergeDo" data-keep="${k.id}" data-drop="${d.id}">איחוד</button><button class="btn ghost" data-act="customerSheet" data-id="${k.id}">חזרה</button></div>`;
   }
 
   function tReceipts(wid) {
@@ -2007,6 +2042,19 @@
     wsTab(d) { ui.wsTab = d.t; render(); },
     wsSheet(d) { openSheet(() => workshopSheetHtml(d.id)); },
     customerSheet(d) { openSheet(() => customerSheetHtml(d.id)); },
+    custMergePick(d) {
+      const c = customer(d.id);
+      openSheet(() => `<h2>איחוד עם לקוח אחר</h2><p class="muted">${esc(c.name)}. בחרו את הכרטיס שיתאחד לתוכו.</p>
+        <div class="choice-list">${S.customers.filter(o => o.id !== c.id).map(o => `<button class="choice" data-act="custMergeAsk" data-keep="${c.id}" data-drop="${o.id}"><b>${esc(o.name)}</b><small dir="ltr">${o.phones.map(fmtPhone).join(', ')}${o.email ? ' · ' + esc(o.email) : ''}</small></button>`).join('')}</div>`);
+    },
+    custMergeAsk(d) { openSheet(() => mergePreviewHtml(d.keep, d.drop)); },
+    custMergeDo(d) { mergeCustomers(d.keep, d.drop); openSheet(() => customerSheetHtml(d.keep)); render(); snack('הכרטיסים אוחדו.'); },
+    custNotSame(d) {
+      const x = customer(d.a), y = customer(d.b);
+      x.notSame = (x.notSame || []).concat(y.id); y.notSame = (y.notSame || []).concat(x.id);
+      if (ui.sheet) renderSheet();
+      render(); snack('סומן: לא אותו לקוח.', () => { x.notSame = x.notSame.filter(i => i !== y.id); y.notSame = y.notSame.filter(i => i !== x.id); render(); });
+    },
     feedback(d) {
       const w = workshop(d.id); w.feedbackSent = true;
       email('feedback', toCustomer(w), 'איך היה בסדנה?', [`שלום ${w.customer.name.split(' ')[0]},`, 'תודה שהגעתם לסטודיו! נשמח לשמוע איך היה, בכמה מילים.', 'הכלים שלכם יהיו מוכנים לאיסוף אחרי הייבוש והשריפה בתנור.']);
