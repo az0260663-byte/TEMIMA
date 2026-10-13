@@ -130,8 +130,23 @@
   function eventJson(ev, calendarId) {
     return `<details class="json"><summary>משאב Event ב-Google Calendar</summary><p class="small muted" dir="ltr">calendarId: ${esc(calendarId)}</p><pre dir="ltr">${esc(JSON.stringify(ev, null, 2))}</pre></details>`;
   }
+  // כרטיס לקוח: לקוח שחוזר (לפי מייל או טלפון) נוסף לאותו כרטיס
+  const digitsOf = p => String(p || '').replace(/\D/g, '');
+  function customerFor(c) {
+    if (!c || !c.name) return null;
+    if (!S.customers) S.customers = [];
+    const mail = String(c.email || '').trim().toLowerCase(), ph = digitsOf(c.phone);
+    let x = S.customers.find(k => (mail && k.email.toLowerCase() === mail) || (ph && digitsOf(k.phone) === ph));
+    if (!x) { x = { id: uid('c'), name: c.name, phone: c.phone || '', email: c.email || '', since: todayIso() }; S.customers.push(x); }
+    else { if (!x.email && c.email) x.email = c.email; if (!x.phone && c.phone) x.phone = c.phone; }
+    return x;
+  }
+  const customerWorkshops = id => S.workshops.filter(w => w.customerId === id).sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
+
   // כתיבת סדנה: נתוני האפליקציה, אירוע ביומן הסטודיו, והמשבצת נמחקת מכל יומני הערוצים
   function bookWorkshop(w) {
+    const c = customerFor(w.customer);
+    if (c) w.customerId = c.id;
     w.eventId = w.eventId || G.newId();
     S.workshops.push(w);
     G.events.insert({ calendarId: CAL.studio, requestBody: X.workshopEvent(w) });
@@ -174,10 +189,43 @@
     });
   }
   // מה שהאתר של תמימה מציע: רק משבצות שבבעלות ערוץ האתר, ופנויות
-  function freeSlots(date) {
+  function freeSlots(date, own) {
     const free = freeTimes(date);
     const notice = (G.channels.get(HOME).minNoticeHours || 0) * 36e5;
-    return slotsOn(date).filter(x => x.channel === HOME && free.includes(x.time) && at(date, x.time) - now() >= notice).map(x => x.time);
+    return slotsOn(date).filter(x => x.channel === HOME && free.includes(x.time) && at(date, x.time) - now() >= notice && !heldByOther(date, x.time, own)).map(x => x.time);
+  }
+
+  /* ---------- שמירת מועד בזמן התשלום ----------
+     כשלקוח עובר לתשלום, המועד נשמר לו ל-5 דקות ולא מוצע לאף אחד אחר.
+     אם לא שילם בזמן הזה, המועד משתחרר וחוזר להיות פנוי. */
+  const HOLD_MIN = 5;
+  const holdOf = id => (S.holds || []).find(h => h.id === id && h.until > now().getTime());
+  const heldByOther = (date, time, own) => (S.holds || []).some(h => h.date === date && h.time === time && h.id !== own && h.until > now().getTime());
+  function holdSlot(date, time, own) {
+    const cur = holdOf(own);
+    if (cur && cur.date === date && cur.time === time) return cur;
+    releaseHold(own);
+    const h = { id: uid('h'), date, time, until: now().getTime() + HOLD_MIN * 6e4 };
+    S.holds = (S.holds || []).concat(h);
+    log('sync', `${shortDay(date)} ${time} נשמר ללקוח ל-${HOLD_MIN} דקות`, 'הלקוח עבר לתשלום. בזמן הזה המועד לא מוצע לאף אחד אחר.');
+    return h;
+  }
+  function releaseHold(id) { if (id && S.holds) S.holds = S.holds.filter(h => h.id !== id); }
+  function pruneHolds() {
+    const n = now().getTime();
+    (S.holds || []).filter(h => h.until <= n).forEach(h => log('sync', `${shortDay(h.date)} ${h.time} שוחרר`, `עברו ${HOLD_MIN} דקות בלי תשלום, והמועד חזר להיות פנוי.`));
+    if (S.holds) S.holds = S.holds.filter(h => h.until > n);
+  }
+
+  // סאמיט שולח למערכת אישור תשלום (בגרסה האמיתית: הודעת שרת מסאמיט).
+  // רק אז המועד נסגר ביומן והקבלה נשמרת בכרטיס הלקוח
+  function sumitPaid(p) {
+    releaseHold(p.holdId);
+    const w = { id: uid('w'), source: HOME, date: p.date, time: p.time, n: p.n, amount: p.amount, customer: p.customer, receipt: 'auto', invoice: p.invoice, paidAt: todayIso(), feedbackSent: false };
+    const removed = bookWorkshop(w);
+    log('sumit', 'סאמיט שלח למערכת אישור תשלום', `חשבונית מס קבלה מס׳ ${p.invoice} נשמרה בכרטיס הלקוח של ${w.customer.name}.`);
+    log('sync', 'היומן עודכן', `המשבצת ${shortDay(w.date)} ${w.time} נסגרה ולא תוצע יותר באתר${removed.length ? ' וגם הוסרה מיומן הסלון' : ' ובסלון'}.`);
+    return w;
   }
   const chName = id => X.channelName(id);
   const isOwn = w => w.source === HOME;
@@ -414,7 +462,7 @@
      ========================================================= */
   const CFG = window.TAMIMA_CONFIG || {};
   const MAIL_KINDS = {
-    booking: ['לקוחות', 'אישור הזמנה וחשבונית'],
+    booking: ['לקוחות', 'אישור הזמנה (הקבלה נשלחת מסאמיט)'],
     wsReminder: ['לקוחות', 'תזכורת יום לפני הסדנה'],
     moved: ['לקוחות', 'שינוי מועד סדנה'],
     wsCancelled: ['לקוחות', 'ביטול סדנה'],
@@ -490,6 +538,7 @@
   // אוטומציות שתלויות בזמן. רצות כל דקה, אחרי "קדם זמן", ובטעינה.
   function runAutomations() {
     const n = now().getTime();
+    pruneHolds();
     activeWorkshops().forEach(w => {
       const start = at(w.date, w.time).getTime(), end = wEnd(w).getTime();
       if (!w.reminderSent && start > n && start - n <= 24 * 36e5) {

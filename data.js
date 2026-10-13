@@ -251,6 +251,8 @@
     return {
       settings, groups, students, lessons, attendance, makeups, payments,
       workshops, content, leads: [], log: [], nextInvoice: invoice, seq: 1,
+      customers: [],    // כרטיסי לקוחות: { id, name, phone, email, since }
+      holds: [],        // מועדים שמורים בזמן תשלום: { id, date, time, until }
       refunds: [],      // זיכויים: { invoice, amount, date, creditNo }
       nextCredit: 5001  // מספור נפרד למסמכי זיכוי
     };

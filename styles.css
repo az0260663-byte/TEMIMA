@@ -1185,3 +1185,16 @@ body.portal #demobar, body.portal #guide, body.portal .guide-handle { display: n
   .home-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 28px; align-items: start; }
   .home-grid .hg-side > h2.sec:first-child { margin-top: 14px; }
 }
+
+/* תשלום סדנה: המועד שמור ל-5 דקות */
+.hold-note { margin: 0 0 12px; padding: 10px 14px; border-radius: 12px; background: var(--warn-soft); color: #6f4e0c; font-size: .92rem; }
+.hold-note b { font-variant-numeric: tabular-nums; }
+.confirming { display: grid; justify-items: center; gap: 6px; text-align: center; padding: 18px 0; }
+.confirming h2 { margin: 6px 0 0; }
+.spin { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--clay); animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+/* כרטיס לקוח */
+.cust-rcpt { border-top: 1px solid var(--line); padding: 10px 0; }
+.cust-rcpt summary { cursor: pointer; font-weight: 700; }
+.cust-rcpt .invoice { margin-top: 10px; }

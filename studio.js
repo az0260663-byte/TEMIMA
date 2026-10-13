@@ -1224,9 +1224,32 @@
     const cancelled = S.workshops.filter(w => w.status === 'cancelled').sort((a, b) => b.date.localeCompare(a.date));
     const past = activeWorkshops().filter(w => wEnd(w) < now()).sort((a, b) => b.date.localeCompare(a.date));
     const list = ui.wsTab === 'upcoming' ? up : ui.wsTab === 'cancelled' ? cancelled : past;
+    const custs = S.customers || [];
     return `<div class="row-between"><h1>סדנאות</h1><button class="btn primary small" data-act="wsNew">+ סדנה</button></div>
-      <div class="tabs" role="tablist" aria-label="סדנאות"><button role="tab" aria-selected="${ui.wsTab === 'upcoming'}" data-act="wsTab" data-t="upcoming" class="${ui.wsTab === 'upcoming' ? 'on' : ''}">קרובות (${up.length})</button><button role="tab" aria-selected="${ui.wsTab === 'past'}" data-act="wsTab" data-t="past" class="${ui.wsTab === 'past' ? 'on' : ''}">עברו (${past.length})</button>${cancelled.length ? `<button role="tab" aria-selected="${ui.wsTab === 'cancelled'}" data-act="wsTab" data-t="cancelled" class="${ui.wsTab === 'cancelled' ? 'on' : ''}">בוטלו (${cancelled.length})</button>` : ''}</div>
-      ${card(list.length ? list.map(wsRow).join('') : empty('אין סדנאות.'))}`;
+      <div class="tabs" role="tablist" aria-label="סדנאות"><button role="tab" aria-selected="${ui.wsTab === 'upcoming'}" data-act="wsTab" data-t="upcoming" class="${ui.wsTab === 'upcoming' ? 'on' : ''}">קרובות (${up.length})</button><button role="tab" aria-selected="${ui.wsTab === 'past'}" data-act="wsTab" data-t="past" class="${ui.wsTab === 'past' ? 'on' : ''}">עברו (${past.length})</button>${cancelled.length ? `<button role="tab" aria-selected="${ui.wsTab === 'cancelled'}" data-act="wsTab" data-t="cancelled" class="${ui.wsTab === 'cancelled' ? 'on' : ''}">בוטלו (${cancelled.length})</button>` : ''}<button role="tab" aria-selected="${ui.wsTab === 'customers'}" data-act="wsTab" data-t="customers" class="${ui.wsTab === 'customers' ? 'on' : ''}">לקוחות (${custs.length})</button></div>
+      ${ui.wsTab === 'customers' ? customersCard(custs) : card(list.length ? list.map(wsRow).join('') : empty('אין סדנאות.'))}`;
+  }
+
+  // לקוחות: כל מי שהזמין סדנה, עם הסדנאות והקבלות שלו
+  function customersCard(custs) {
+    const rows = custs.map(c => ({ c, ws: customerWorkshops(c.id) })).sort((a, b) => ((b.ws[0] || {}).date || '').localeCompare((a.ws[0] || {}).date || ''));
+    return card(rows.length ? rows.map(({ c, ws }) => {
+      const paid = ws.filter(w => w.status !== 'cancelled').reduce((a, w) => a + w.amount, 0);
+      return `<button class="ws-row" data-act="customerSheet" data-id="${c.id}"><span class="dot dot-site"></span>
+        <div><b>${esc(c.name)}</b><small>${ws.length === 1 ? 'סדנה אחת' : `${ws.length} סדנאות`} · ${money(paid)}${ws[0] ? ` · אחרונה: ${shortDay(ws[0].date)}` : ''}</small></div></button>`;
+    }).join('') : empty('עדיין אין לקוחות. כל מי שמזמין סדנה נכנס לכאן אוטומטית.'));
+  }
+  function customerSheetHtml(id) {
+    const c = (S.customers || []).find(x => x.id === id);
+    if (!c) return '';
+    const ws = customerWorkshops(c.id);
+    const receipts = ws.filter(w => w.invoice && (w.receipt === 'auto' || w.receipt === 'manual'));
+    return `<h2>${esc(c.name)}</h2><p class="muted">לקוח מאז ${dmy(c.since)}.${parse(c.since).getFullYear()}</p>
+      <dl class="kv"><dt>טלפון</dt><dd dir="ltr">${esc(c.phone || '')}</dd><dt>מייל</dt><dd dir="ltr">${esc(c.email || '')}</dd></dl>
+      <h3>סדנאות</h3>${ws.map(w => `<button class="ws-row" data-act="wsSheet" data-id="${w.id}"><span class="dot dot-${srcCss(w)}"></span>
+        <div><b>${longDay(w.date)}, ${w.time}</b><small>${w.n} משתתפים · ${money(w.amount)} · ${isOwn(w) ? 'מהאתר' : esc(chName(w.source))}</small></div>${w.status === 'cancelled' ? chip('בוטלה', 'muted') : ''}</button>`).join('') || empty('אין סדנאות.')}
+      <h3>קבלות</h3>${receipts.map(w => `<details class="cust-rcpt"><summary>חשבונית מס קבלה מס׳ ${w.invoice} · ${money(w.amount)}</summary>
+        ${invoiceDoc(w.invoice, c.name, `סדנת קרמיקה, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}`, w.amount, w.paidAt || w.date)}</details>${refundLines(w.invoice)}`).join('') || empty('אין קבלות עדיין.')}`;
   }
 
   function tReceipts(wid) {
@@ -1896,6 +1919,7 @@
     },
     wsTab(d) { ui.wsTab = d.t; render(); },
     wsSheet(d) { openSheet(() => workshopSheetHtml(d.id)); },
+    customerSheet(d) { openSheet(() => customerSheetHtml(d.id)); },
     feedback(d) {
       const w = workshop(d.id); w.feedbackSent = true;
       email('feedback', toCustomer(w), 'איך היה בסדנה?', [`שלום ${w.customer.name.split(' ')[0]},`, 'תודה שהגעתם לסטודיו! נשמח לשמוע איך היה, בכמה מילים.', 'הכלים שלכם יהיו מוכנים לאיסוף אחרי הייבוש והשריפה בתנור.']);

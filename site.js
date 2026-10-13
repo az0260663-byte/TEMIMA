@@ -190,9 +190,23 @@
     </div>`;
   }
 
+  // ספירה לאחור של המועד השמור במסך התשלום. כשהזמן נגמר, המועד משתחרר
+  const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  let holdTimer = null;
+  function startHoldTimer() {
+    if (holdTimer) return;
+    holdTimer = setInterval(() => {
+      const h = holdOf(bk.hold);
+      if (bk.step !== 'pay' || route().page !== 'workshop') { clearInterval(holdTimer); holdTimer = null; if (bk.step === 'pay' && !h) A.bkExpire(); return; }
+      if (!h) { clearInterval(holdTimer); holdTimer = null; A.bkExpire(); return; }
+      const el = document.getElementById('hold-left');
+      if (el) el.textContent = mmss(h.until - now().getTime());
+    }, 1000);
+  }
+
   function bookingView() {
     const list = [['slot', 'משתתפים ומועד'], ['details', 'פרטים'], ['summary', 'סיכום'], ['pay', 'תשלום']];
-    const top = bk.step === 'done' ? '' : `<a class="back" href="#/client">חזרה לאתר</a><span class="eyebrow">${esc(S.content.workshopTitle)} · שעתיים</span><h1 class="display">הזמנת סדנה</h1>${steps(list, bk.step)}`;
+    const top = bk.step === 'done' ? '' : `<a class="back" href="#/client">חזרה לאתר</a><span class="eyebrow">${esc(S.content.workshopTitle)} · שעתיים</span><h1 class="display">הזמנת סדנה</h1>${steps(list, bk.step === 'confirming' ? 'pay' : bk.step)}`;
     const err = bk.err ? `<p class="err" id="bk-err" role="alert">${esc(bk.err)}</p>` : '';
     const inv = f => (bk.errField === f ? 'aria-invalid="true" aria-describedby="bk-err"' : '');
     let body = '';
@@ -201,7 +215,7 @@
       const days = [];
       for (let i = 0; i <= G.channels.get(HOME).horizonDays; i++) {
         const date = iso(addDays(startOfToday(), i));
-        const slots = freeSlots(date);
+        const slots = freeSlots(date, bk.hold);
         if (slots.length) days.push({ date, slots });
       }
       if (!bk.date || !days.some(d => d.date === bk.date)) { bk.date = days.length ? days[0].date : null; bk.time = null; }
@@ -253,13 +267,18 @@
         <button class="btn ghost block" data-act="bkGo" data-s="details">חזרה</button>`);
     }
 
-    if (bk.step === 'pay') body = sumitView(price(bk.n), `סדנת היכרות, ${bk.n} משתתפים, ${shortDay(bk.date)} ${bk.time}`, 'bkPay', 'bkPayBack');
+    if (bk.step === 'pay') {
+      const h = holdOf(bk.hold);
+      body = (h ? `<p class="hold-note">המועד שמור לכם עוד <b id="hold-left">${mmss(h.until - now().getTime())}</b> דקות</p>` : '') + sumitView(price(bk.n), `סדנת היכרות, ${bk.n} משתתפים, ${shortDay(bk.date)} ${bk.time}`, 'bkPay', 'bkPayBack');
+      startHoldTimer();
+    }
+    if (bk.step === 'confirming') body = card(`<div class="confirming" role="status"><span class="spin" aria-hidden="true"></span><h2>מאשרים את התשלום</h2><p class="muted">רגע, ההזמנה נסגרת.</p></div>`);
 
     if (bk.step === 'done') {
       const w = workshop(bk.done);
       body = card(`<div class="done-ic">✓</div>
         <h1 class="center">ההזמנה אושרה</h1>
-        <p class="center">שלחנו אישור וחשבונית מס קבלה למייל <b>${esc(w.customer.email)}</b></p>
+        <p class="center">אישור ההזמנה נשלח למייל <b>${esc(w.customer.email)}</b>, והקבלה נשלחה אליו מסאמיט.</p>
         <dl class="kv">
           <dt>תאריך</dt><dd>${longDay(w.date)}</dd>
           <dt>שעה</dt><dd>${w.time} עד ${endOf(w.time)}</dd>
@@ -300,9 +319,9 @@
 
   Object.assign(A, {
     // לקוח
-    startBooking() { bk = { step: 'slot', n: bk.n || 2, date: null, time: null, name: '', phone: '', email: '', err: '', errField: '', marketing: false, done: null }; },
+    startBooking() { releaseHold(bk.hold); bk = { hold: null, step: 'slot', n: bk.n || 2, date: null, time: null, name: '', phone: '', email: '', err: '', errField: '', marketing: false, done: null }; },
     bkN(d) { bk.n = Math.min(6, Math.max(2, bk.n + Number(d.d))); render(); },
-    bkGo(d) { bk.err = ''; bk.step = d.s; render(); scrollTop(); },
+    bkGo(d) { if (d.s === 'slot') { releaseHold(bk.hold); bk.hold = null; } bk.err = ''; bk.step = d.s; render(); scrollTop(); },
     bkDate(d) { bk.date = d.date; bk.time = null; render(); },
     bkTime(d) { bk.time = d.t; render(); },
     bkDetails() {
@@ -316,25 +335,38 @@
       render(); if (!bk.errField) scrollTop();
     },
     bkToPay() {
-      if (!freeSlots(bk.date).includes(bk.time)) { bk.step = 'slot'; bk.time = null; bk.err = 'המועד שבחרתם נתפס בינתיים. בחרו מועד אחר.'; }
-      else { bk.err = ''; bk.step = 'pay'; }
+      if (!freeSlots(bk.date, bk.hold).includes(bk.time)) { releaseHold(bk.hold); bk.hold = null; bk.step = 'slot'; bk.time = null; bk.err = 'המועד שבחרתם נתפס בינתיים. בחרו מועד אחר.'; }
+      else { bk.hold = holdSlot(bk.date, bk.time, bk.hold).id; bk.err = ''; bk.step = 'pay'; }
       render(); scrollTop();
     },
     bkPayBack() { bk.step = 'summary'; render(); },
-    bkPay() {
-      if (!freeSlots(bk.date).includes(bk.time)) { bk.step = 'slot'; bk.time = null; bk.err = 'המועד שבחרתם נתפס בינתיים. בחרו מועד אחר.'; render(); return; }
-      const inv = S.nextInvoice++;
-      const w = { id: uid('w'), source: 'site', date: bk.date, time: bk.time, n: bk.n, amount: price(bk.n),
-        customer: { name: bk.name.trim(), phone: bk.phone.trim(), email: bk.email.trim() }, receipt: 'auto', invoice: inv, paidAt: todayIso(), feedbackSent: false };
-      const removed = bookWorkshop(w);
-      log('sumit', `סאמיט: התקבל תשלום ${money(w.amount)}`, `חשבונית מס קבלה מס׳ ${inv} הופקה אוטומטית.`);
-      email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, `חשבונית מס קבלה מס׳ ${inv} מצורפת.`, `אפשר לבטל או לשנות מועד עד ${S.settings.workshopCancelHours} שעות לפני.`, 'נתראה, תמימה']);
-      email('newBooking', toStudio(), `הזמנה חדשה: ${w.customer.name}, ${shortDay(w.date)} ${w.time}`, [`${w.customer.name} הזמין/ה סדנה מהאתר.`, `${longDay(w.date)}, ${w.time} · ${w.n} משתתפים · ${money(w.amount)}.`, `טלפון: ${w.customer.phone}`], { cta: ['לסדנאות', siteUrl('#/tamima/workshops')] });
-      log('sync', 'היומן עודכן', `המשבצת ${shortDay(w.date)} ${w.time} נתפסה ולא תוצע יותר באתר${removed.length ? ' וגם הוסרה מיומן הסלון' : ' ובסלון'}.`);
-      log('notify', 'הזמנה חדשה נכנסה לדשבורד', `סדנה מהאתר, ${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}.`);
-      bk.done = w.id; bk.step = 'done';
+    // עברו 5 דקות בלי תשלום: המועד משתחרר והלקוח חוזר לבחירת מועד
+    bkExpire() {
+      const h = (S.holds || []).find(x => x.id === bk.hold);
+      if (h) log('sync', `${shortDay(h.date)} ${h.time} שוחרר`, `עברו ${HOLD_MIN} דקות בלי תשלום, והמועד חזר להיות פנוי.`);
+      releaseHold(bk.hold); bk.hold = null;
+      bk.step = 'slot'; bk.time = null; bk.err = `עברו ${HOLD_MIN} דקות, והמועד שוחרר. אפשר לבחור מועד שוב.`;
       render(); scrollTop();
-      toast('הזמנה חדשה מהאתר', `${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}`);
+    },
+    bkPay() {
+      if (!holdOf(bk.hold)) return A.bkExpire();
+      const amount = price(bk.n), inv = S.nextInvoice++;
+      const customer = { name: bk.name.trim(), phone: bk.phone.trim(), email: bk.email.trim() };
+      const order = { holdId: bk.hold, date: bk.date, time: bk.time, n: bk.n, amount, invoice: inv, customer };
+      // שלב 1: סאמיט מחייב את הכרטיס, מפיק קבלה ושולח אותה ללקוח
+      log('sumit', `סאמיט: התקבל תשלום ${money(amount)}`, `חשבונית מס קבלה מס׳ ${inv} הופקה ונשלחה מסאמיט אל ${customer.email}.`);
+      bk.step = 'confirming'; render(); scrollTop();
+      // שלב 2: סאמיט שולח למערכת אישור תשלום, ורק אז ההזמנה נסגרת
+      setTimeout(() => {
+        const w = sumitPaid(order);
+        bk.hold = null;
+        email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, `הקבלה (חשבונית מס קבלה מס׳ ${inv}) נשלחה אליכם בנפרד מסאמיט.`, `אפשר לבטל או לשנות מועד עד ${S.settings.workshopCancelHours} שעות לפני.`, 'נתראה, תמימה']);
+        email('newBooking', toStudio(), `הזמנה חדשה: ${w.customer.name}, ${shortDay(w.date)} ${w.time}`, [`${w.customer.name} הזמין/ה סדנה מהאתר.`, `${longDay(w.date)}, ${w.time} · ${w.n} משתתפים · ${money(w.amount)}.`, `טלפון: ${w.customer.phone}`], { cta: ['לסדנאות', siteUrl('#/tamima/workshops')] });
+        log('notify', 'הזמנה חדשה נכנסה לדשבורד', `סדנה מהאתר, ${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}.`);
+        bk.done = w.id; bk.step = 'done';
+        render(); scrollTop();
+        toast('הזמנה חדשה מהאתר', `${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}`);
+      }, 1200);
     },
     bkRestart() { A.startBooking(); location.hash = '#/client'; },
     ics(d) {
