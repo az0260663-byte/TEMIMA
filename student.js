@@ -20,6 +20,10 @@
           <ul class="doc-list"><li>תמימה מוסיפה סטודנט: "תמימה", ואז "חוגים", "סטודנטים", ו"+ סטודנט".</li><li>או שמישהו משאיר פרטים לקורס באתר, ותמימה מוסיפה אותו מ"ממתין לך עכשיו".</li></ul>
           <a class="btn primary block" href="#/tamima/classes">לחוגים של תמימה</a>`)}
       </main></div>`;
+    // לפני התשלום הראשון: רק מסך התשלום, בלי תפריט ובלי שאר האזור
+    if (isLocked(s)) return `<div class="appshell student">
+      ${appHead('cups-grass', `שלום ${first(s)}`, `${group(s.groupId).name} · ${group(s.groupId).start} עד ${group(s.groupId).end}`)}
+      <main id="main" tabindex="-1" class="wrap">${page === 'pay' ? sPay() : sWelcomePay(s)}</main></div>`;
     const actives = S.students.filter(x => x.active !== false);
     const pick = !PORTAL && actives.length > 1 ? `<label class="me-pick"><span class="sr-only">צפייה באפליקציה של</span><select data-me>${actives.map(x => `<option value="${x.id}" ${x.id === s.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>` : '';
     const nav = appNav('student', page === 'makeup' || page === 'pay' ? (page === 'pay' ? 'payments' : 'lessons') : page, [['home', 'בית'], ['lessons', 'שיעורים'], ['payments', 'תשלומים']]);
@@ -40,6 +44,13 @@
     }
     return card(`<div class="row-between"><h2>תשלום</h2>${chip(ps.key === 'paid' ? 'הכרטיסייה הבאה שולמה' : 'הכרטיסייה שולמה', 'paid')}</div>
       <p class="muted small">הכרטיסייה הבאה תישלח לתשלום אחרי השיעור השלישי.</p>`);
+  }
+
+  function sWelcomePay(s) {
+    return `<h1>ברוכים הבאים</h1>${card(`<h2>תשלום הכרטיסייה הראשונה</h2>
+      <p>כרטיסייה של ${S.settings.cardSize} שיעורים, ${money(S.settings.cardPrice)}. התשלום בכרטיס אשראי, בקישור מאובטח של סאמיט.</p>
+      <p class="muted small">אחרי התשלום נפתח האזור האישי: השיעורים, הכרטיסייה, ההשלמות והתשלומים. הקישור יישלח גם למייל.</p>
+      <a class="btn primary block" href="#/student/pay">לתשלום</a>`, 'hero-card')}`;
   }
 
   function sHome() {
@@ -172,7 +183,12 @@
       ui.stuMsg = `ההשלמה נקבעה ל${longDay(l.date)} ב${group(l.groupId).name}.`;
       closeSheet(); location.hash = '#/student/lessons'; flashClear();
     },
-    stuPay() { const inv = payCard(me()); ui.stuMsg = `התשלום התקבל. חשבונית מס קבלה מס׳ ${inv} נשלחה למייל.`; location.hash = '#/student/payments'; flashClear(); },
+    stuPay() {
+      const opens = isLocked(me());
+      const inv = payCard(me());
+      ui.stuMsg = opens ? `התשלום התקבל, והאזור האישי פתוח. חשבונית מס קבלה מס׳ ${inv} והקישור האישי נשלחו למייל.` : `התשלום התקבל. חשבונית מס קבלה מס׳ ${inv} נשלחה למייל.`;
+      location.hash = opens ? '#/student/home' : '#/student/payments'; flashClear();
+    },
     stuPayBack() { history.back(); },
     stuInvoice(d) {
       const p = S.payments.find(x => x.id === d.id);

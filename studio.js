@@ -224,9 +224,11 @@
     const fee = activeWorkshops().filter(w => inM(w.date)).reduce((a, w) => a + commissionOf(w), 0);
     const seg = (v, k) => `<span class="bar-${k}" style="width:${(v / total) * 100}%"></span>`;
 
-    return `<h1 class="sr-only">בית</h1>
+    // במחשב: "ממתין לך" בעמודה אחת, "היום" ו"החודש" בעמודה לידה. בטלפון ובטאבלט: אחד מתחת לשני
+    return `<h1 class="sr-only">בית</h1><div class="home-grid"><section class="hg-main">
       <h2 class="sec">ממתין לך עכשיו</h2>
       ${items.length ? `<div class="todos">${items.join('')}</div>` : card(empty('אין כרגע משהו שמחכה לך. יום רגוע!'))}
+      </section><section class="hg-side">
       <h2 class="sec">היום</h2>
       ${card(today.length ? today.map(x => x.html).join('') : empty('אין שיעורים או סדנאות היום.'))}
       <h2 class="sec">החודש, ${MONTHS[startOfToday().getMonth()]}</h2>
@@ -237,7 +239,7 @@
           <li><span class="dot dot-site"></span>סדנאות מהאתר<b>${money(site)}</b></li>
           <li><span class="dot dot-salon"></span>סדנאות מערוצי שיווק<b>${money(salon)}</b></li>
           <li class="fee">עמלות לערוצים<b>${money(fee)}</b></li>
-        </ul>`)}`;
+        </ul>`)}</section></div>`;
   }
 
   /* ---------- יומן: רשת שעות כמו ביומן גוגל (דרישות י-1 עד י-17 באפיון) ---------- */
@@ -678,7 +680,7 @@
       S.students.push(n);
       const intro = [`היי ${first(n)},`, `שמחים שהצטרפת. הקבוצה נפגשת ביום ${DAYS[g.day]}, ${g.start} עד ${g.end}.`, `השיעור הראשון: ${longDay(n.start)}.`, `הכתובת: ${S.content.address}.`];
       if (paid) email('welcome', toStudent(n), `ברוכים הבאים ל${g.name}!`, intro.concat('השיעורים, הכרטיסייה והתשלומים שלך נמצאים באפליקציה.'), { cta: ['לאפליקציה שלי', studentUrl(n, 'home')] });
-      else email('welcome', toStudent(n), `ברוכים הבאים ל${g.name}!`, intro.concat(`לתשלום הכרטיסייה הראשונה (${money(S.settings.cardPrice)}, 4 שיעורים) בכרטיס אשראי, בקישור המאובטח:`), { cta: ['לתשלום הכרטיסייה', studentUrl(n, 'pay')] });
+      else email('welcome', toStudent(n), `ברוכים הבאים ל${g.name}!`, intro.concat(`לתשלום הכרטיסייה הראשונה (${money(S.settings.cardPrice)}, 4 שיעורים) בכרטיס אשראי, בקישור המאובטח:`, 'אחרי התשלום יישלח אליך קישור לאזור האישי, עם השיעורים, הכרטיסייה וההשלמות.'), { cta: ['לתשלום הכרטיסייה', studentUrl(n, 'pay')] });
       log('sumit', paid ? `${n.name}: הכרטיסייה כבר שולמה` : `סאמיט: נשלח קישור תשלום ל${n.name}`, paid ? `הספירה מתחילה מ-${used} שיעורים שנוצלו. לא נשלח קישור תשלום.` : `הכרטיסייה הראשונה, ${money(S.settings.cardPrice)}. הסטטוס "ממתין לתשלום" עד השיעור הראשון.`);
       // אם כבר נוצלו 3 שיעורים, דרישת התשלום לכרטיסייה הבאה יוצאת מיד
       if (paid && used >= S.settings.cardSize - 1) {

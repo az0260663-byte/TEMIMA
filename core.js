@@ -220,6 +220,8 @@
     if (s.requestSent) return { key: 'requested', label: 'נשלחה דרישת תשלום' };
     return { key: 'ok', label: 'בתוקף' };
   }
+  // לפני התשלום הראשון האזור האישי סגור: הקישור פותח רק את מסך התשלום
+  const isLocked = s => !!(s && s.owes && s.firstDue);
   const openCredits = s => S.makeups.filter(m => m.studentId === s.id && !m.bookedLessonId && m.expires >= todayIso());
 
   function log(kind, title, body) { S.log.unshift({ id: uid('e'), at: new Date(), kind, title, body: body || '' }); }
@@ -242,10 +244,11 @@
 
   function payCard(s) {
     const inv = S.nextInvoice++;
+    const opens = isLocked(s);                              // התשלום הראשון פותח את האזור האישי
     S.payments.push({ id: uid('p'), studentId: s.id, date: todayIso(), amount: S.settings.cardPrice, invoice: inv });
     if (s.owes) { s.owes = false; s.firstDue = false; s.requestSent = false; s.reminded = null; } else s.nextPaid = true;
     log('sumit', `סאמיט: התקבל תשלום מ${s.name}`, `${money(S.settings.cardPrice)}, חשבונית מס קבלה מס׳ ${inv} הופקה אוטומטית.`);
-    email('payReceipt', toStudent(s), `התשלום התקבל, חשבונית מס קבלה מס׳ ${inv}`, [`היי ${first(s)},`, `קיבלנו את התשלום על הכרטיסייה (${money(S.settings.cardPrice)}). תודה!`, `חשבונית מס קבלה מס׳ ${inv} מצורפת ונשמרת גם באפליקציה.`], { cta: ['לתשלומים שלי', studentUrl(s, 'payments')] });
+    email('payReceipt', toStudent(s), `התשלום התקבל, חשבונית מס קבלה מס׳ ${inv}`, [`היי ${first(s)},`, `קיבלנו את התשלום על הכרטיסייה (${money(S.settings.cardPrice)}). תודה!`, `חשבונית מס קבלה מס׳ ${inv} מצורפת ונשמרת גם באפליקציה.`].concat(opens ? ['מעכשיו האזור האישי שלך פתוח: השיעורים, הכרטיסייה, ההשלמות והתשלומים. זה הקישור האישי שלך, כדאי לשמור אותו.'] : []), { cta: opens ? ['לאזור האישי שלי', studentUrl(s, 'home')] : ['לתשלומים שלי', studentUrl(s, 'payments')] });
     return inv;
   }
 
