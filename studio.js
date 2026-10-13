@@ -151,7 +151,7 @@
     return `<h2>${esc(m.subject)}</h2>
       <dl class="kv"><dt>אל</dt><dd>${esc(m.toName)} <span dir="ltr">${esc(m.to || 'אין כתובת')}</span></dd><dt>סוג</dt><dd>${MAIL_KINDS[m.kind][1]}</dd><dt>מצב</dt><dd>${chip(MAIL_STATUS[m.status][0], MAIL_STATUS[m.status][1])}${m.mode === 'test' ? ' נשלח לתיבה שלך לבדיקה' : ''}</dd></dl>
       ${m.error ? `<p class="err" role="alert">${esc(m.error)}</p>` : ''}
-      <div class="mail-preview" dir="rtl">${m.text.split('\n').map(l => `<p>${esc(l)}</p>`).join('')}${m.cta ? `<a class="btn primary" href="${esc(m.cta[1])}" target="_blank" rel="noopener">${esc(m.cta[0])}</a>` : ''}</div>
+      <div class="mail-preview" dir="rtl">${m.text.split('\n').map(l => `<p>${esc(l)}</p>`).join('')}${m.extra || ''}${m.cta ? `<a class="btn primary" href="${esc(m.cta[1])}" target="_blank" rel="noopener">${esc(m.cta[0])}</a>` : ''}</div>
       ${m.cta ? '<p class="muted small">הכפתור נפתח בלשונית חדשה, בדיוק כמו אצל מי שקיבל את המייל.</p>' : ''}
       ${m.status === 'failed' ? `<button class="btn primary block" data-act="mailRetry" data-id="${m.id}">שליחה חוזרת</button>` : ''}`;
   }

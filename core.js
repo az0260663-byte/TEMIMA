@@ -223,7 +223,7 @@
     releaseHold(p.holdId);
     const w = { id: uid('w'), source: HOME, date: p.date, time: p.time, n: p.n, amount: p.amount, customer: p.customer, receipt: 'auto', invoice: p.invoice, paidAt: todayIso(), feedbackSent: false };
     const removed = bookWorkshop(w);
-    log('sumit', 'סאמיט שלח למערכת אישור תשלום', `חשבונית מס קבלה מס׳ ${p.invoice} נשמרה בכרטיס הלקוח של ${w.customer.name}.`);
+    log('sumit', 'סאמיט שלח למערכת אישור תשלום וקבלה', `חשבונית מס קבלה מס׳ ${p.invoice} התקבלה ונשמרה בכרטיס הלקוח של ${w.customer.name}.`);
     log('sync', 'היומן עודכן', `המשבצת ${shortDay(w.date)} ${w.time} נסגרה ולא תוצע יותר באתר${removed.length ? ' וגם הוסרה מיומן הסלון' : ' ובסלון'}.`);
     return w;
   }
@@ -462,7 +462,7 @@
      ========================================================= */
   const CFG = window.TAMIMA_CONFIG || {};
   const MAIL_KINDS = {
-    booking: ['לקוחות', 'אישור הזמנה (הקבלה נשלחת מסאמיט)'],
+    booking: ['לקוחות', 'אישור הזמנה וחשבונית'],
     wsReminder: ['לקוחות', 'תזכורת יום לפני הסדנה'],
     moved: ['לקוחות', 'שינוי מועד סדנה'],
     wsCancelled: ['לקוחות', 'ביטול סדנה'],
@@ -498,21 +498,29 @@
   }
 
   // תבנית HTML למייל: עיצוב מוטבע (תוכנות מייל מתעלמות מקובצי CSS), מימין לשמאל
-  function mailHtml(subject, lines, cta) {
+  function mailHtml(subject, lines, cta, extra = '') {
     const p = lines.map(l => `<p style="margin:0 0 12px;line-height:1.6">${esc(l)}</p>`).join('');
     const btn = cta ? `<p style="margin:20px 0"><a href="${esc(cta[1])}" style="background:#a5552f;color:#fff;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:bold;display:inline-block">${esc(cta[0])}</a></p>` : '';
     return `<!doctype html><html lang="he" dir="rtl"><body style="margin:0;background:#f6f0e7;font-family:Arial,Helvetica,sans-serif;color:#2a231d">
       <div style="max-width:560px;margin:0 auto;padding:24px 16px" dir="rtl">
         <div style="font-size:20px;font-weight:bold;color:#7d3b1c;margin-bottom:16px">הסטודיו של תמימה</div>
         <div style="background:#fffcf7;border:1px solid #e6dccd;border-radius:16px;padding:22px">
-          <h1 style="font-size:20px;margin:0 0 14px">${esc(subject)}</h1>${p}${btn}
+          <h1 style="font-size:20px;margin:0 0 14px">${esc(subject)}</h1>${p}${extra}${btn}
         </div>
         <p style="font-size:12px;color:#6c5f55;margin-top:16px">הסטודיו של תמימה · ${esc(S.content.address)}<br>המייל נשלח בעקבות הזמנה או הרשמה. <a href="${esc(publicUrl('#/client/privacy'))}" style="color:#7d3b1c">מדיניות פרטיות</a></p>
       </div></body></html>`;
   }
 
+  // הקבלה בגוף המייל (עיצוב מוטבע). בגרסה האמיתית מצורף גם הקובץ שסאמיט הפיק
+  function receiptMailHtml(inv, name, desc, amount, date) {
+    const row = (k, v) => `<tr><td style="padding:4px 0;color:#6c5f55;width:110px">${k}</td><td style="padding:4px 0">${v}</td></tr>`;
+    return `<div style="margin:18px 0;border:1px solid #e6dccd;border-radius:12px;padding:16px;background:#fff" dir="rtl">
+      <div style="font-weight:bold;margin-bottom:8px">חשבונית מס קבלה מס׳ ${inv}</div>
+      <table style="border-collapse:collapse;font-size:14px;width:100%">${row('תאריך', `${dmy(date)}.${parse(date).getFullYear()}`)}${row('לכבוד', esc(name))}${row('פירוט', esc(desc))}${row('סכום', `<b>${money(amount)}</b>`)}${row('אמצעי תשלום', 'כרטיס אשראי (סאמיט)')}</table></div>`;
+  }
+
   function email(kind, to, subject, lines, opts = {}) {
-    const item = { id: uid('m'), kind, to: (to && to.email) || '', toName: (to && to.name) || '', subject, text: lines.join('\n'), html: mailHtml(subject, lines, opts.cta), cta: opts.cta || null, at: new Date(), status: 'queued', mode: '', error: '' };
+    const item = { id: uid('m'), kind, to: (to && to.email) || '', toName: (to && to.name) || '', subject, text: lines.join('\n'), html: mailHtml(subject, lines, opts.cta, opts.extra), cta: opts.cta || null, extra: opts.extra || '', at: new Date(), status: 'queued', mode: '', error: '' };
     S.mail.outbox.unshift(item);
     if (S.mail.auto[kind] === false) { item.status = 'off'; log('sync', `לא נשלח: ${MAIL_KINDS[kind][1]}`, `האוטומציה כבויה ב"עוד" > "מיילים".`); return item; }
     log(MAIL_KINDS[kind][0] === 'לקוחות' ? 'mail-client' : MAIL_KINDS[kind][0] === 'סטודנטים' ? 'mail-student' : 'notify', `${MAIL_KINDS[kind][1]} · ${item.toName}`, item.text);

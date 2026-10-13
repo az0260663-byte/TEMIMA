@@ -278,7 +278,7 @@
       const w = workshop(bk.done);
       body = card(`<div class="done-ic">✓</div>
         <h1 class="center">ההזמנה אושרה</h1>
-        <p class="center">אישור ההזמנה נשלח למייל <b>${esc(w.customer.email)}</b>, והקבלה נשלחה אליו מסאמיט.</p>
+        <p class="center">אישור ההזמנה והקבלה נשלחו למייל <b>${esc(w.customer.email)}</b>.</p>
         <dl class="kv">
           <dt>תאריך</dt><dd>${longDay(w.date)}</dd>
           <dt>שעה</dt><dd>${w.time} עד ${endOf(w.time)}</dd>
@@ -353,14 +353,14 @@
       const amount = price(bk.n), inv = S.nextInvoice++;
       const customer = { name: bk.name.trim(), phone: bk.phone.trim(), email: bk.email.trim() };
       const order = { holdId: bk.hold, date: bk.date, time: bk.time, n: bk.n, amount, invoice: inv, customer };
-      // שלב 1: סאמיט מחייב את הכרטיס, מפיק קבלה ושולח אותה ללקוח
-      log('sumit', `סאמיט: התקבל תשלום ${money(amount)}`, `חשבונית מס קבלה מס׳ ${inv} הופקה ונשלחה מסאמיט אל ${customer.email}.`);
+      // שלב 1: סאמיט מחייב את הכרטיס ומפיק קבלה
+      log('sumit', `סאמיט: התקבל תשלום ${money(amount)}`, `חשבונית מס קבלה מס׳ ${inv} הופקה ונשלחה למערכת.`);
       bk.step = 'confirming'; render(); scrollTop();
-      // שלב 2: סאמיט שולח למערכת אישור תשלום, ורק אז ההזמנה נסגרת
+      // שלב 2: סאמיט שולח למערכת אישור תשלום והקבלה. המערכת סוגרת את המועד, שומרת את הקבלה בכרטיס הלקוח ושולחת ללקוח מייל אחד
       setTimeout(() => {
         const w = sumitPaid(order);
         bk.hold = null;
-        email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, `הקבלה (חשבונית מס קבלה מס׳ ${inv}) נשלחה אליכם בנפרד מסאמיט.`, `אפשר לבטל או לשנות מועד עד ${S.settings.workshopCancelHours} שעות לפני.`, 'נתראה, תמימה']);
+        email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, `חשבונית מס קבלה מס׳ ${inv} מצורפת.`, `אפשר לבטל או לשנות מועד עד ${S.settings.workshopCancelHours} שעות לפני.`, 'נתראה, תמימה'], { extra: receiptMailHtml(inv, w.customer.name, `סדנת קרמיקה, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}`, w.amount, w.paidAt) });
         email('newBooking', toStudio(), `הזמנה חדשה: ${w.customer.name}, ${shortDay(w.date)} ${w.time}`, [`${w.customer.name} הזמין/ה סדנה מהאתר.`, `${longDay(w.date)}, ${w.time} · ${w.n} משתתפים · ${money(w.amount)}.`, `טלפון: ${w.customer.phone}`], { cta: ['לסדנאות', siteUrl('#/tamima/workshops')] });
         log('notify', 'הזמנה חדשה נכנסה לדשבורד', `סדנה מהאתר, ${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}.`);
         bk.done = w.id; bk.step = 'done';
