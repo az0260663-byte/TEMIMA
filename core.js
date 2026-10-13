@@ -224,7 +224,9 @@
     const w = { id: uid('w'), source: HOME, date: p.date, time: p.time, n: p.n, amount: p.amount, customer: p.customer, receipt: 'auto', invoice: p.invoice, paidAt: todayIso(), feedbackSent: false };
     const removed = bookWorkshop(w);
     log('sumit', 'סאמיט שלח למערכת אישור תשלום וקבלה', `חשבונית מס קבלה מס׳ ${p.invoice} התקבלה ונשמרה בכרטיס הלקוח של ${w.customer.name}.`);
-    log('sync', 'היומן עודכן', `המשבצת ${shortDay(w.date)} ${w.time} נסגרה ולא תוצע יותר באתר${removed.length ? ' וגם הוסרה מיומן הסלון' : ' ובסלון'}.`);
+    // רק משבצות של ערוצים אחרים (לא של האתר עצמו) נזכרות כאן
+    const others = [...new Set(removed.filter(x => x.channel !== HOME).map(x => chName(x.channel)))];
+    log('sync', 'היומן עודכן', `המשבצת ${shortDay(w.date)} ${w.time} נסגרה ולא תוצע יותר באתר${others.length ? `, וגם הוסרה מיומן ${others.map(n => `"${n}"`).join(' ומיומן ')}` : ''}.`);
     return w;
   }
   const chName = id => X.channelName(id);
