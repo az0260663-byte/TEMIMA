@@ -308,14 +308,78 @@
   const firstLessonStarted = s => s.used > 0 || S.lessons.some(l => l.groupId === s.groupId && (!s.start || l.date >= s.start) && !l.cancelled && lStart(l) <= now());
   function payStatus(s) {
     if (s.owes && s.firstDue && !firstLessonStarted(s)) return { key: 'requested', label: 'ממתין לתשלום' };
-    if (s.owes || (!s.nextPaid && s.used >= S.settings.cardSize)) return { key: 'overdue', label: 'דורש טיפול' };
+    if (s.owes || (!s.nextPaid && s.used >= S.settings.cardSize && !noNextCard(s))) return { key: 'overdue', label: 'דורש טיפול' };
     if (s.nextPaid) return { key: 'paid', label: 'שולם' };
     if (s.requestSent) return { key: 'requested', label: 'נשלחה דרישת תשלום' };
     return { key: 'ok', label: 'בתוקף' };
   }
+  // תחילת הכרטיסייה הבאה: השיעור שאחרי מה שנשאר בכרטיסייה הנוכחית
+  function nextCardStart(s) {
+    const up = S.lessons.filter(l => l.groupId === s.groupId && !l.cancelled && inLesson(s, l) && lStart(l) > now()).sort((a, b) => lStart(a) - lStart(b));
+    const l = up[Math.max(0, S.settings.cardSize - s.used)];
+    return l ? l.date : null;
+  }
+  // אחרי הודעת עזיבה: כרטיסייה שתתחיל אחרי תאריך הסיום לא נשלחת לתשלום
+  const noNextCard = s => !!(s.leave && (!nextCardStart(s) || nextCardStart(s) > s.leave.endDate));
   // לפני התשלום הראשון האזור האישי סגור: הקישור פותח רק את מסך התשלום
   const isLocked = s => !!(s && s.owes && s.firstDue);
   const openCredits = s => S.makeups.filter(m => m.studentId === s.id && !m.bookedLessonId && m.expires >= todayIso());
+
+  /* ---------- מדיניות הביטולים לסטודנטים (נוסח רשמי) ---------- */
+  const POLICY = () => [
+    'אם לא מתאפשר להגיע לשיעור, ניתן לעדכן על היעדרות עד 24 שעות מראש, ואז תהיה אפשרות להשלים את השיעור תוך חודש בשיעור אחר, בהתאם למקום פנוי ובתיאום מראש.',
+    'ניתן להיעדר עד שיעור אחד בחודש.',
+    'היעדרות ללא עדכון מראש, או עדכון פחות מ-24 שעות לפני השיעור, מכל סיבה שהיא, תחויב בתשלום מלא.',
+    'במידה ורוצים להפסיק את השיעורים, יש אפשרות יציאה לאחר שלושה חודשים, בתנאי של התראה בהודעה כתובה חודש ממועד הסיום.',
+    'לבעלת הסטודיו זכות מלאה לבטל שיעור או לדחותו למועד אחר, מסיבות שונות. במקרה כזה הלקוח יעודכן עד 48 שעות לפני מועד השיעור.',
+    `הנהלת הסטודיו שומרת לעצמה את הזכות להפסיק בכל רגע השתתפות של תלמיד/ה שאינו מתאים למסגרת הלימודית או לכללי הסטודיו, בצירוף החזר כספי יחסי בגין השיעורים שטרם מומשו, בניכוי ${money(S.settings.stopParticipationFee)} בגין עלויות טיפול והיערכות.`
+  ];
+  const policyHtml = () => `<h2>מדיניות ביטולים קורס שנתי</h2><ul class="doc-list">${POLICY().map(p => `<li>${esc(p)}</li>`).join('')}</ul><p class="muted small">גרסה ${esc(S.settings.policyVersion)}</p>`;
+  const fullDate = d => `${dmy(d)}.${parse(d).getFullYear()}`;
+
+  /* ---------- סיום הקורס (עזיבה) ----------
+     יציאה לאחר שלושה חודשים, בהתראה בהודעה כתובה חודש ממועד הסיום.
+     תאריך הסיום: חודש מהיום, ולא לפני 3 חודשים מתחילת הקורס. */
+  const LEAVE_CLAUSE = 'יציאה לאחר שלושה חודשים, בהתראה בהודעה כתובה חודש ממועד הסיום.';
+  function leaveEndDate(s) {
+    const month = iso(addMonths(startOfToday(), 1));
+    const three = iso(addMonths(parse(s.start || s.joined || todayIso()), 3));
+    return { date: three > month ? three : month, early: three >= month, three };
+  }
+  // שיעורים של הקבוצה מהיום ועד תאריך מסוים (כולל), לפי היום הקבוע של הקבוצה, בלי שיעורים שהסטודיו ביטל
+  function lessonsUntil(s, end) {
+    const g = group(s.groupId);
+    let n = 0;
+    for (let d = startOfToday(); iso(d) <= end; d = addDays(d, 1)) {
+      const k = iso(d);
+      if (d.getDay() !== g.day || (s.start && k < s.start) || at(k, g.start) <= now()) continue;
+      const l = S.lessons.find(x => x.groupId === g.id && x.date === k);
+      if (!l || !l.cancelled) n++;
+    }
+    return n;
+  }
+  // שיעורים ששולמו ועוד לא נוצלו: מה שנשאר בכרטיסייה הנוכחית, ועוד כרטיסייה הבאה אם כבר שולמה
+  const paidUnused = s => (s.owes ? 0 : Math.max(0, S.settings.cardSize - s.used)) + (s.nextPaid ? S.settings.cardSize : 0);
+  const perLesson = () => S.settings.cardPrice / S.settings.cardSize;
+  const lastPayment = s => S.payments.filter(p => p.studentId === s.id).sort((a, b) => b.date.localeCompare(a.date) || b.invoice - a.invoice)[0];
+  function leaveMailStudent(s) {
+    email('leaveConfirm', toStudent(s), 'קיבלנו את הודעת העזיבה', [`היי ${first(s)},`, 'קיבלנו את ההודעה על סיום הקורס.', `תאריך הסיום: ${longDay(s.leave.endDate)}.`, 'עד אז הכל ממשיך כרגיל: השיעורים, ההשלמות והתשלומים.', 'תודה על הזמן בסטודיו, תמימה']);
+  }
+  // הסטודנט יוצא מהקורס: המקום מתפנה, וההשלמות והביטולים העתידיים מתבטלים
+  function deactivateStudent(s) {
+    s.active = false;
+    S.makeups.forEach(m => { if (m.studentId === s.id && m.bookedLessonId && lStart(lesson(m.bookedLessonId)) > now()) m.bookedLessonId = null; });
+    S.lessons.filter(l => lStart(l) > now()).forEach(l => { if (S.attendance[l.id]) delete S.attendance[l.id].rec[s.id]; });
+  }
+  // בתאריך הסיום: הסטודנט לא פעיל, ונפתח "זיכוי ממתין להחלטה" בלי סכום. תמימה מזינה אותו בעצמה
+  function endLeavers() {
+    S.students.filter(s => s.active !== false && s.leave && s.leave.endDate <= todayIso()).forEach(s => {
+      deactivateStudent(s);
+      log('sync', `${s.name}: הקורס הסתיים`, `תאריך הסיום (${fullDate(s.leave.endDate)}) הגיע. הסטודנט כבר לא ברשימת הנוכחות.`);
+      const p = lastPayment(s);
+      if (p) openRefundCase({ inv: p.invoice, reason: 'leave', studentId: s.id, suggested: null, info: `שיעורים ששולמו ולא נוצלו עד תאריך הסיום: ${paidUnused(s)} (מחיר לשיעור: ${money(perLesson())})` });
+    });
+  }
 
   function log(kind, title, body) { S.log.unshift({ id: uid('e'), at: new Date(), kind, title, body: body || '' }); }
 
@@ -327,7 +391,9 @@
       s.used = 0; s.nextPaid = false; s.requestSent = s.owes; s.reminded = null;
     }
     s.used++;
-    if (s.used === size - 1 && !s.nextPaid && !s.owes && !s.requestSent) {
+    if (s.used === size - 1 && !s.nextPaid && !s.owes && !s.requestSent && noNextCard(s)) {
+      log('sync', `${s.name}: לא נשלחה דרישת תשלום`, `הכרטיסייה הבאה הייתה מתחילה אחרי תאריך הסיום (${fullDate(s.leave.endDate)}).`);
+    } else if (s.used === size - 1 && !s.nextPaid && !s.owes && !s.requestSent) {
       s.requestSent = true;
       email('payRequest', toStudent(s), 'הכרטיסייה הבאה מחכה לתשלום', [`היי ${first(s)},`, 'סיימת 3 מתוך 4 שיעורים בכרטיסייה.', `לתשלום הכרטיסייה הבאה (${money(S.settings.cardPrice)}) בכרטיס אשראי, בקישור המאובטח:`, 'תודה, תמימה'], { cta: ['לתשלום בסאמיט', studentUrl(s, 'pay')] });
     }
@@ -335,8 +401,9 @@
   }
   function unuseLesson(s) { if (s.used > 0) s.used--; }
 
-  function payCard(s) {
+  function payCard(s, o = {}) {
     const inv = S.nextInvoice++;
+    if (!o.manual && !s.token) s.token = newToken();
     const opens = isLocked(s);                              // התשלום הראשון פותח את האזור האישי
     S.payments.push({ id: uid('p'), studentId: s.id, date: todayIso(), amount: S.settings.cardPrice, invoice: inv });
     if (s.owes) { s.owes = false; s.firstDue = false; s.requestSent = false; s.reminded = null; } else s.nextPaid = true;
@@ -655,6 +722,7 @@
   function runAutomations() {
     const n = now().getTime();
     pruneHolds();
+    endLeavers();
     activeWorkshops().forEach(w => {
       const start = at(w.date, w.time).getTime(), end = wEnd(w).getTime();
       if (!w.reminderSent && start > n && start - n <= 24 * 36e5) {

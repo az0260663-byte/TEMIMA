@@ -213,6 +213,11 @@
         <div class="todo-main">${chip('התנגשות', 'overdue')}<b>${esc(c.title)}</b><small>חופפת ל${esc(c.src.label)}, ${c.src.when}</small></div>
         <div class="btn-row">${c.type === 'ws' ? `<button class="btn small primary" data-act="wsMoveOpen" data-id="${c.id}">הזזת הסדנה</button><button class="btn small ghost" data-act="wsCancelAsk" data-id="${c.id}">ביטול הסדנה</button>` : `<button class="btn small primary" data-act="lessonCancelAsk" data-l="${c.id}">ביטול השיעור</button>`}<button class="btn small ghost" data-act="conflictOk" data-k="${esc(c.key)}">לא רלוונטי</button></div>
       </div>`));
+    S.students.filter(s => s.leave && !s.leave.seen && s.active !== false).forEach(s => items.push(`
+      <div class="todo">
+        <div class="todo-main">${chip('הודעת עזיבה', 'requested')}<b>${esc(s.name)}</b><small>${group(s.groupId).name} · תאריך הסיום ${fullDate(s.leave.endDate)}${s.leave.source === 'outside' ? ' · התקבלה מחוץ לאפליקציה' : ' · עם חתימה'}</small></div>
+        <div class="btn-row"><a class="btn small primary" href="#/tamima/student/${s.id}">לכרטיס</a><button class="btn small ghost" data-act="leaveSeen" data-id="${s.id}">ראיתי</button></div>
+      </div>`));
     openRefundCases().forEach(x => {
       const info = invoiceInfo(x.inv);
       items.push(`
@@ -853,6 +858,21 @@
     <div class="btn-row"><button class="btn danger" data-act="${act}" ${attrs}>${yes || 'כן'}</button><button class="btn ghost" data-act="closeSheet">לא, חזרה</button></div>`;
   const dayOptions = n => futureDays(n).map(d => [d, longDay(d)]);
 
+  // כרטיס "סיום הקורס" בכרטיס הסטודנט: ההודעה, החתימה, ותאריך סיום שתמימה יכולה לשנות
+  function leaveCardHtml(s) {
+    const L = s.leave;
+    if (!ui.ld || ui.ld.id !== s.id) ui.ld = { id: s.id, date: L.endDate };
+    const min = L.minDate || L.endDate;
+    return card(`<h2>הודעת עזיבה</h2>
+      <dl class="kv"><dt>התקבלה ב</dt><dd>${fullDate(L.noticeDate)}${L.source === 'outside' ? ' · התקבלה מחוץ לאפליקציה' : ''}</dd>
+        ${L.name ? `<dt>שם</dt><dd>${esc(L.name)}</dd>` : ''}<dt>תאריך הסיום</dt><dd><b>${longDay(L.endDate)}</b></dd><dt>גרסת מדיניות</dt><dd>${esc(L.version)}</dd></dl>
+      ${L.sig ? `<img class="sig-img" src="${esc(L.sig)}" alt="החתימה של ${esc(L.name || s.name)}">` : ''}
+      <label class="field"><span>שינוי תאריך הסיום</span><input type="date" data-bind="ld.date" data-rerender="page" value="${esc(ui.ld.date)}"></label>
+      ${ui.ld.date && ui.ld.date < min ? `<p class="policy warn">התאריך מוקדם מהמדיניות (לפיה: ${longDay(min)}). אפשר לשמור בכל זאת.</p>` : ''}
+      ${ui.ld.date && ui.ld.date !== L.endDate ? `<button class="btn ghost small" data-act="stuLeaveDate" data-id="${s.id}">שמירת תאריך הסיום</button>` : ''}
+      <p class="muted small">עד תאריך הסיום הכל ממשיך כרגיל, כולל דרישות תשלום. כרטיסייה שתתחיל אחרי הסיום לא נשלחת לתשלום.</p>`);
+  }
+
   /* ---------- כרטיס סטודנט ---------- */
   function tStudentCard(id) {
     const s = student(id) || S.students[0];
@@ -882,13 +902,15 @@
           <h1>${esc(s.name)}</h1>
           <p class="muted">${g ? `${esc(g.name)} · יום ${DAYS[g.day]} ${g.start}` : ''}${s.start ? ` · ${s.start > todayIso() ? `מתחיל ב${longDay(s.start)}` : `תחילת הקורס ${dmy(s.start)}`}` : ''}</p>
           <p class="stu-contact"><span dir="ltr">${esc(s.phone)}</span>${s.email ? ` · <span dir="ltr">${esc(s.email)}</span>` : ' · <span class="muted">אין מייל</span>'}</p>
-          <div class="srow-meta">${off ? chip('לא פעיל', 'muted') : chip(ps.label, ps.key)}${credits.some(m => !m.bookedLessonId) ? chip('השלמה פתוחה', 'site') : ''}</div>
+          <div class="srow-meta">${off ? chip('לא פעיל', 'muted') : chip(ps.label, ps.key)}${credits.some(m => !m.bookedLessonId) ? chip('השלמה פתוחה', 'site') : ''}${s.policy ? chip(`מדיניות אושרה ב-${fullDate(s.policy.date)}`, 'paid') : chip('מדיניות לא אושרה', 'requested')}${s.leave && !off ? chip(`מסיים ב-${fullDate(s.leave.endDate)}`, 'requested') : ''}</div>
+          ${s.policy ? '' : `<button class="btn ghost small" data-act="stuPolicyLink" data-id="${s.id}">שליחת קישור לאישור המדיניות</button>`}
         </div>
         <div class="btn-row"><button class="btn primary small" data-act="stuEdit" data-id="${s.id}">עריכת פרטים</button>${off
           ? `<button class="btn ghost small" data-act="stuActive" data-id="${s.id}" data-on="1">החזרה לקורס</button>`
-          : `<button class="btn ghost small" data-act="stuRemoveAsk" data-id="${s.id}">הסרה מהקורס</button>`}</div>
+          : `${s.leave ? '' : `<button class="btn ghost small" data-act="stuLeaveOutside" data-id="${s.id}">התקבלה הודעת עזיבה</button>`}<button class="btn ghost small" data-act="stuStopAsk" data-id="${s.id}">הסטודיו מפסיק את ההשתתפות</button>`}</div>
       </section>
       <div class="stu-grid">
+        ${s.leave ? leaveCardHtml(s) : ''}
         ${card(`<h2>כרטיסייה</h2>${punchDots(s)}
           <div class="counter"><button class="icon-btn" data-act="stuUse" data-id="${s.id}" data-d="-1" aria-label="הורדת שיעור מהכרטיסייה" ${s.used <= 0 ? 'disabled' : ''}>−</button><b aria-live="polite">${s.used}/${size}</b><button class="icon-btn" data-act="stuUse" data-id="${s.id}" data-d="1" aria-label="הוספת שיעור לכרטיסייה">+</button></div>
           <p class="muted small center">תיקון ידני, למשל שיעור שלא סומן.</p>
@@ -907,7 +929,7 @@
         ${card(`<h2>שיעורים</h2>
           <h3 class="mini-h">הבאים</h3>${upcoming.map(x => `<div class="ws-row"><div><b>${shortDay(x.l.date)}</b><small>${esc(group(x.l.groupId).name)}${x.kind === 'makeup' ? ' · השלמה' : ''}</small></div>${stChip(x.l)}</div>`).join('') || empty('אין שיעורים קרובים.')}
           <h3 class="mini-h">אחרונים</h3>${recent.map(l => `<button class="ws-row" data-act="goLesson" data-l="${l.id}"><div><b>${shortDay(l.date)}</b><small>${esc(group(l.groupId).name)} · לסימון נוכחות</small></div>${stChip(l)}</button>`).join('') || empty('אין עדיין.')}`)}
-        ${card(`<h2>תשלומים</h2>${pays.map(p => `<div class="pay-row"><button class="ws-row" data-act="invoiceSheet" data-id="${p.id}"><span class="dot dot-paid" aria-hidden="true"></span><div><b>${money(p.amount)}</b><small>${dmy(p.date)} · חשבונית מס קבלה מס׳ ${p.invoice}${p.manual ? ' · נרשם ידנית' : ''}</small></div><span class="go">חשבונית</span></button>${refundLines(p.invoice)}${refundable(p.invoice) ? `<button class="btn ghost small" data-act="refundOpen" data-inv="${p.invoice}" aria-label="זיכוי לחשבונית ${p.invoice}">זיכוי</button>` : ''}</div>`).join('') || empty('אין תשלומים עדיין.')}`)}
+        ${card(`<h2>תשלומים</h2>${pays.map(p => `<div class="pay-row"><button class="ws-row" data-act="invoiceSheet" data-id="${p.id}"><span class="dot dot-paid" aria-hidden="true"></span><div><b>${money(p.amount)}</b><small>${dmy(p.date)} · חשבונית מס קבלה מס׳ ${p.invoice}${p.manual ? ' · נרשם ידנית' : ''}</small></div><span class="go">חשבונית</span></button><div class="btn-row">${pdfBtn(p.invoice)}</div>${refundLines(p.invoice)}${refundable(p.invoice) ? `<button class="btn ghost small" data-act="refundOpen" data-inv="${p.invoice}" aria-label="זיכוי לחשבונית ${p.invoice}">זיכוי</button>` : ''}</div>`).join('') || empty('אין תשלומים עדיין.')}`)}
       </div>`;
   }
 
@@ -1812,10 +1834,50 @@
     },
     stuPayManual(d) {
       const s = student(d.id);
-      payCard(s);
+      payCard(s, { manual: true });
       S.payments[S.payments.length - 1].manual = true;
       render();
       snack('התשלום נרשם, והחשבונית נשלחה לסטודנט.');
+    },
+    stuPolicyLink(d) {
+      const s = student(d.id);
+      email('policyLink', toStudent(s), 'מדיניות הביטולים של הקורס', [`היי ${first(s)},`, 'מצורף קישור לקריאה ואישור של מדיניות הביטולים של הקורס.', 'תודה, תמימה'], { cta: ['לקריאה ואישור', studentUrl(s, 'policy')] });
+      render(); snack('נשלח קישור לאישור המדיניות.');
+    },
+    leaveSeen(d) { const s = student(d.id); s.leave.seen = true; render(); snack('סומן.', () => { s.leave.seen = false; render(); }); },
+    // הודעת עזיבה שהגיעה ישירות לתמימה: אותו חישוב של תאריך הסיום, בלי חתימה
+    stuLeaveOutside(d) {
+      const s = student(d.id), e = leaveEndDate(s);
+      openSheet(confirmHtml(`התקבלה הודעת עזיבה מ${esc(s.name)}?`, `${LEAVE_CLAUSE} תאריך הסיום: <b>${longDay(e.date)}</b> (${lessonsUntil(s, e.date)} שיעורים עד אז). הסטודנט יקבל מייל אישור.`, 'stuLeaveOutsideDo', `data-id="${s.id}"`, 'רישום ההודעה'));
+    },
+    stuLeaveOutsideDo(d) {
+      const s = student(d.id), e = leaveEndDate(s);
+      s.leave = { noticeDate: todayIso(), endDate: e.date, minDate: e.date, name: '', sig: '', version: S.settings.policyVersion, source: 'outside', seen: true };
+      leaveMailStudent(s);
+      log('notify', `הודעת עזיבה נרשמה: ${s.name}`, `התקבלה מחוץ לאפליקציה. תאריך הסיום ${fullDate(e.date)}.`);
+      closeSheet(); render(); snack(`נרשם. תאריך הסיום: ${longDay(e.date)}.`);
+    },
+    stuLeaveDate(d) {
+      const s = student(d.id), v = ui.ld.date;
+      if (!v) return;
+      s.leave.endDate = v;
+      log('notify', `תאריך הסיום עודכן: ${s.name}`, `${fullDate(v)}${v < (s.leave.minDate || v) ? ', מוקדם מהמדיניות' : ''}.`);
+      render(); snack(`תאריך הסיום עודכן ל${longDay(v)}.`);
+    },
+    // הסטודיו מפסיק את ההשתתפות: מוצע החזר על השיעורים שלא נוצלו, פחות דמי הטיפול. שום החזר לא יוצא לבד
+    stuStopAsk(d) {
+      const s = student(d.id), un = paidUnused(s), sug = Math.max(0, un * perLesson() - S.settings.stopParticipationFee);
+      openSheet(confirmHtml(`הסטודיו מפסיק את ההשתתפות של ${esc(s.name)}?`, `הסטודנט יוצא מהקורס עכשיו, והמקום בקבוצה מתפנה.${lastPayment(s) ? ` ייפתח מסך זיכוי עם הצעה: ${un} שיעורים שלא נוצלו × ${money(perLesson())}, פחות ${money(S.settings.stopParticipationFee)} = ${money(sug)}.` : ''}`, 'stuStop', `data-id="${s.id}"`, 'הפסקת ההשתתפות'));
+    },
+    stuStop(d) {
+      const s = student(d.id), un = paidUnused(s), p = lastPayment(s);
+      const sug = Math.max(0, un * perLesson() - S.settings.stopParticipationFee);
+      deactivateStudent(s);
+      log('sync', `${s.name}: הסטודיו הפסיק את ההשתתפות`, 'המקום בקבוצה התפנה. ההיסטוריה והתשלומים נשמרו.');
+      render();
+      if (!p) { closeSheet(); snack('ההשתתפות הופסקה.'); return; }
+      const x = openRefundCase({ inv: p.invoice, reason: 'stop', studentId: s.id, suggested: Math.min(sug, p.amount - refundedOf(p.invoice)), why: `${un} שיעורים שלא נוצלו × ${money(perLesson())}, פחות ${money(S.settings.stopParticipationFee)} דמי טיפול והיערכות.` });
+      openCaseSheet(x.id);
     },
     stuGrant(d) {
       const s = student(d.id);
@@ -1860,7 +1922,7 @@
       openSheet(confirmHtml(`להסיר את ${esc(g.name)}?`, 'השיעורים העתידיים יורדו מהיומן ומהאתר. ההיסטוריה נשמרת.', 'grpRemove', `data-id="${g.id}"`, 'הסרה'));
     },
     grpRemove(d) { const err = removeGroup(d.id); closeSheet(); render(); snack(err || 'הקבוצה הוסרה.'); },
-    lessonCancelAsk(d) { const l = lesson(d.l); openSheet(confirmHtml(`לבטל את השיעור ב${longDay(l.date)}?`, `כל הסטודנטים ב${esc(group(l.groupId).name)} יקבלו הודעה. השיעור לא ייספר בכרטיסייה, והוא יורד מהיומן.`, 'lessonCancel', `data-l="${l.id}"`, 'ביטול השיעור')); },
+    lessonCancelAsk(d) { const l = lesson(d.l); const late = (lStart(l) - now()) / 36e5 < 48; openSheet(confirmHtml(`לבטל את השיעור ב${longDay(l.date)}?`, `כל הסטודנטים ב${esc(group(l.groupId).name)} יקבלו הודעה. השיעור לא ייספר בכרטיסייה, והוא יורד מהיומן.${late ? '</p><p class="policy warn">לפי המדיניות, יש לעדכן עד 48 שעות לפני.' : ''}`, 'lessonCancel', `data-l="${l.id}"`, 'ביטול השיעור')); },
     lessonCancel(d) { setLessonCancelled(d.l, true); closeSheet(); render(); snack('השיעור בוטל, והסטודנטים קיבלו הודעה.', () => setLessonCancelled(d.l, false)); },
     lessonRestore(d) { setLessonCancelled(d.l, false); render(); snack('השיעור חזר ללוח.'); },
     conflictOk(d) {
