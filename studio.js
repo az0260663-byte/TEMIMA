@@ -1,30 +1,57 @@
 /* studio.js: הניהול של תמימה בלבד. בית, יומן, חוגים, סדנאות, קבלות, הגדרות וחיבור לגוגל. */
 'use strict';
 
+  /* ---------- מסך הזיכוי ----------
+     הסכום מוצע (או ריק), ותמימה משנה אותו כרצונה. נחסם רק סכום מעל היתרה שלא זוכתה, כי סאמיט לא יאפשרו אותו.
+     שלוש החלטות: "ביצוע זיכוי" (הקריאה היחידה לזיכוי בסאמיט), "ללא החזר", "אחר כך". */
   function refundSheetHtml() {
     const f = ui.rf;
     const info = f && invoiceInfo(f.inv);
     if (!info) return '';
-    const done = refundedOf(f.inv), left = info.amount - done, sug = suggestRefund(info);
-    return `<h2>${f.wsId ? 'הסדנה בוטלה. זיכוי ללקוח' : `זיכוי לחשבונית מס׳ ${f.inv}`}</h2>
+    const done = refundedOf(f.inv), left = info.amount - done;
+    const x = f.caseId && refundCase(f.caseId);
+    const w = f.wsId && workshop(f.wsId);
+    const cu = w && customerOf(w);
+    const title = f.late ? 'פנייה מאוחרת מהלקוח' : f.reason && f.reason !== 'manual' ? `זיכוי ממתין להחלטה · ${REFUND_REASON[f.reason]}` : `זיכוי לחשבונית מס׳ ${f.inv}`;
+    const late = f.late && w && w.status !== 'cancelled' ? `<div class="policy"><b>הזזה למועד אחר (חד פעמי)</b>במקום ביטול: הסדנה עוברת למועד אחר, והחשבונית נשארת.</div>
+        ${cu && cu.lateMoveUsed ? `<p class="policy warn">הלקוח כבר קיבל הזזה חד פעמית ב-${dmy(cu.lateMoveUsed)}.${parse(cu.lateMoveUsed).getFullYear()}.</p>` : ''}
+        <button class="btn primary block" data-act="lateMove">הזזה למועד אחר (חד פעמי)</button><h3>או ביטול</h3>` : '';
+    return `<h2>${title}</h2>
       <p class="muted">${esc(info.name)} · ${esc(info.desc)}</p>
+      ${x && x.status === 'failed' ? `<p class="err">הניסיון הקודם נכשל: ${esc(x.error)}</p>` : ''}
+      ${late}
       <dl class="kv">
         <dt>חשבונית</dt><dd>מס׳ ${f.inv} · ${money(info.amount)}</dd>
         ${done ? `<dt>זוכה עד עכשיו</dt><dd>${money(done)}</dd>` : ''}
-        <dt>יתרה לזיכוי</dt><dd><b>${money(left)}</b></dd>
+        <dt>יתרה שלא זוכתה</dt><dd><b>${money(left)}</b></dd>
       </dl>
-      <div class="policy"><b>סכום מוצע: ${money(sug.amount)}</b>${esc(sug.why)}</div>
+      ${f.suggested != null ? `<div class="policy"><b>סכום מוצע: ${money(f.suggested)}</b>${esc(f.why || '')}</div>` : ''}
       <label class="field"><span>סכום הזיכוי</span><span class="with-suffix"><input type="number" min="0" step="1" inputmode="decimal" data-bind="rf.amount" value="${esc(f.amount)}" ${invAttr('rf', 'amount')}>₪</span></label>
+      ${f.info ? `<p class="muted small">${esc(f.info)}</p>` : ''}
       ${errP('rf')}
-      <button class="btn primary block" data-act="refundDo">זיכוי בכרטיס האשראי</button>
-      ${f.wsId ? '<button class="btn ghost block" data-act="refundSkip">ביטול בלי זיכוי</button>' : '<button class="btn ghost block" data-act="closeSheet">חזרה</button>'}
-      ${ui.guided ? '<div class="demo-note"><b>מאחורי הקלעים</b><p>המערכת מבצעת זיכוי בכרטיס ומפיקה מסמך זיכוי דרך ה-API של סאמיט. תמימה לא נכנסת לסאמיט.</p></div>' : ''}`;
+      <button class="btn primary block" data-act="refundDo" data-needs="rf.amount" ${String(f.amount).trim() ? '' : 'disabled'}>ביצוע זיכוי</button>
+      <button class="btn ghost block" data-act="refundSkip">${f.late && w && w.status !== 'cancelled' ? 'ביטול הסדנה ללא החזר' : 'ללא החזר'}</button>
+      <button class="btn ghost block" data-act="refundLater">אחר כך</button>
+      ${ui.guided ? '<div class="demo-note"><b>מאחורי הקלעים</b><p>המערכת פותחת את הזיכוי לתמימה. ההחזר יוצא רק אחרי אישור שלה, בקריאה אחת ל-API של סאמיט שמחזירה את הכסף ומפיקה מסמך זיכוי.</p></div>' : ''}`;
   }
-  function openRefund(inv, wsId) {
+  // פתיחת מסך הזיכוי. אם כבר יש לחשבונית זיכוי שממתין להחלטה, נפתח אותו
+  function openRefund(inv, o = {}) {
     const info = invoiceInfo(inv);
     if (!info) return;
-    ui.rf = { inv, wsId: wsId || null, amount: String(Math.round(suggestRefund(info).amount * 100) / 100), err: '', errField: '' };
+    const open = !o.caseId && openRefundCases().find(x => x.inv === inv);
+    if (open) return openCaseSheet(open.id);
+    const sug = o.reason ? o.suggested : suggestRefund(info);
+    const suggested = o.reason ? (sug == null ? null : sug) : sug.amount;
+    ui.rf = { inv, caseId: o.caseId || null, wsId: o.wsId || null, studentId: o.studentId || null, late: !!o.late, reason: o.reason || 'manual', suggested,
+      why: o.reason ? o.why || '' : sug.why, info: o.info || '', amount: suggested == null ? '' : String(Math.round(suggested * 100) / 100), err: '', errField: '' };
     openSheet(refundSheetHtml);
+  }
+  function openCaseSheet(id) {
+    const x = refundCase(id);
+    if (!x) return;
+    openRefund(x.inv, { caseId: x.id, wsId: x.wsId, studentId: x.studentId, late: x.late, reason: x.reason, suggested: x.suggested, why: x.why, info: x.info });
+    if (x.status === 'failed' && x.amountTried) ui.rf.amount = String(x.amountTried);
+    renderSheet();
   }
   /* ================= חיבור ליומן גוגל האמיתי (gsync.js) ================= */
   const gsLive = () => ['connected', 'syncing'].includes(gsState().status);
@@ -184,8 +211,16 @@
     openConflicts().forEach(c => items.push(`
       <div class="todo">
         <div class="todo-main">${chip('התנגשות', 'overdue')}<b>${esc(c.title)}</b><small>חופפת ל${esc(c.src.label)}, ${c.src.when}</small></div>
-        <div class="btn-row">${c.type === 'ws' ? `<button class="btn small primary" data-act="wsMoveOpen" data-id="${c.id}">הזזת הסדנה</button>` : `<button class="btn small primary" data-act="lessonCancelAsk" data-l="${c.id}">ביטול השיעור</button>`}<button class="btn small ghost" data-act="conflictOk" data-k="${esc(c.key)}">לא רלוונטי</button></div>
+        <div class="btn-row">${c.type === 'ws' ? `<button class="btn small primary" data-act="wsMoveOpen" data-id="${c.id}">הזזת הסדנה</button><button class="btn small ghost" data-act="wsCancelAsk" data-id="${c.id}">ביטול הסדנה</button>` : `<button class="btn small primary" data-act="lessonCancelAsk" data-l="${c.id}">ביטול השיעור</button>`}<button class="btn small ghost" data-act="conflictOk" data-k="${esc(c.key)}">לא רלוונטי</button></div>
       </div>`));
+    openRefundCases().forEach(x => {
+      const info = invoiceInfo(x.inv);
+      items.push(`
+      <div class="todo">
+        <div class="todo-main">${x.status === 'failed' ? chip('דורש טיפול', 'overdue') : chip('זיכוי ממתין להחלטה', 'requested')}<b>${esc(info ? info.name : '')} · ${REFUND_REASON[x.reason]}</b><small>${x.status === 'failed' ? 'הזיכוי נכשל בסאמיט · ' : ''}${x.suggested != null ? `מוצע ${money(x.suggested)}` : 'הסכום לפי החלטתך'} · חשבונית מס׳ ${x.inv}</small></div>
+        <button class="btn small primary" data-act="caseOpen" data-id="${x.id}">להחלטה</button>
+      </div>`);
+    });
     S.students.filter(s => payStatus(s).key === 'overdue').forEach(s => items.push(`
       <div class="todo">
         <button class="todo-main" data-act="studentSheet" data-id="${s.id}">${chip('דורש טיפול', 'overdue')}<b>${esc(s.name)}</b><small>${group(s.groupId).name} · ${s.owes ? (s.firstDue ? 'הכרטיסייה הראשונה לא שולמה, והשיעור הראשון כבר התחיל' : `שיעור ${s.used} מתוך ${S.settings.cardSize}, הכרטיסייה הנוכחית לא שולמה`) : `שיעור ${s.used} מתוך ${S.settings.cardSize}, הכרטיסייה הבאה לא שולמה`}</small></button>
@@ -733,12 +768,7 @@
     const ignore = { date: w.date, s: toMin(w.time), e: toMin(w.time) + X.WORKSHOP_MIN };
     const prob = startProblem(date, time, true, ignore);
     if (prob) return prob;
-    const from = `${shortDay(w.date)} ${w.time}`;
-    w.date = date; w.time = time;
-    patchWorkshopEvent(w, ['start', 'end']);
-    G.channels.book(date, time);
-    runSync();
-    email('moved', toCustomer(w), 'המועד של הסדנה עודכן', [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה עברה מ${from} ל${longDay(date)}, ${time} עד ${endOf(time)}.`, `הכתובת: ${S.content.address}.`]);
+    shiftWorkshop(w, date, time);
     return '';
   }
   function setWorkshopCancelled(id, on, opts = {}) {
@@ -1212,7 +1242,7 @@
 
   function wsRow(w) {
     const past = wEnd(w) < now();
-    const rc = w.status === 'cancelled' ? chip('בוטלה', 'muted') : w.receipt === 'auto' ? chip('קבלה הופקה אוטומטית', 'paid') : w.receipt === 'manual' ? chip('קבלה הופקה', 'paid') : w.receipt === 'unpaid' ? chip('לא שולמה', 'requested') : chip('דורשת קבלה ידנית', 'overdue');
+    const rc = w.status === 'pending' ? chip('ממתין לתשלום', 'requested') : w.status === 'cancelled' ? chip('בוטלה', 'muted') : w.receipt === 'auto' ? chip('קבלה הופקה אוטומטית', 'paid') : w.receipt === 'manual' ? chip('קבלה הופקה', 'paid') : w.receipt === 'unpaid' ? chip('לא שולמה', 'requested') : chip('דורשת קבלה ידנית', 'overdue');
     return `<button class="ws-row" data-act="wsSheet" data-id="${w.id}">
       <span class="dot dot-${srcCss(w)}"></span>
       <div><b>${relDay(w.date)} ${w.time}</b><small>${esc(w.customer.name)} · ${w.n} משתתפים · ${money(w.amount)}</small>
@@ -1220,7 +1250,7 @@
     </button>`;
   }
   function tWorkshops() {
-    const up = activeWorkshops().filter(w => wEnd(w) >= now()).sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+    const up = S.workshops.filter(w => (isLive(w) || (w.status === 'pending' && w.holdUntil > now().getTime())) && wEnd(w) >= now()).sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
     const cancelled = S.workshops.filter(w => w.status === 'cancelled').sort((a, b) => b.date.localeCompare(a.date));
     const past = activeWorkshops().filter(w => wEnd(w) < now()).sort((a, b) => b.date.localeCompare(a.date));
     const list = ui.wsTab === 'upcoming' ? up : ui.wsTab === 'cancelled' ? cancelled : past;
@@ -1290,12 +1320,13 @@
     else if (tab === 'mail') body = mailTab();
     else if (tab === 'settings') {
       body = card(`<h2>מחירון</h2>${num('price2', 'סדנה לזוג', '₪')}${num('pricePer', 'סדנה, 3 עד 6, למשתתף', '₪')}${num('cardPrice', 'כרטיסייה, 4 שיעורים', '₪')}`)
-        + card(`<h2>מדיניות ביטול</h2>${num('workshopCancelHours', 'סדנה: ביטול עד', 'שעות לפני')}${num('lessonCancelHours', 'חוג: ביטול עם השלמה עד', 'שעות לפני')}
+        + card(`<h2>מדיניות ביטול</h2>${num('workshopCancelHours', 'סדנה: ביטול עד', 'שעות לפני')}${num('stopParticipationFee', 'הפסקת השתתפות ביוזמת הסטודיו: ניכוי', '₪')}
+          <label class="field inline"><span>מספר הוואטסאפ של תמימה<small class="muted">לפניות של לקוחות על ביטול מאוחר</small></span><input class="txt" type="tel" dir="ltr" data-settext="whatsapp" value="${esc(st.whatsapp || '')}"></label>${num('lessonCancelHours', 'חוג: ביטול עם השלמה עד', 'שעות לפני')}
           <p class="muted small">השלמה אחת בחודש, בתוקף לחודש מיום הביטול, בקבוצה אחרת שיש בה מקום.</p>`)
         + `<p class="note">בקרוב: ניהול מלאי, וניהול צוות ומורה נוספת.</p>`;
     } else {
       const rows = G.channels.list().map(ch => {
-        const sold = S.workshops.filter(w => w.source === ch.id).length;
+        const sold = S.workshops.filter(w => w.source === ch.id && isLive(w)).length;
         const off = ch.status !== 'active' ? 'disabled' : '';
         const set = (k, label, suffix, max) => `<label class="field inline"><span>${label}</span><span class="with-suffix"><input type="number" min="0" ${max ? `max="${max}"` : ''} data-chset="${ch.id}|${k}" value="${ch[k]}" ${off}>${suffix}</span></label>`;
         const txt = (k, label) => `<label class="field inline"><span>${label}</span><input class="txt" data-chset="${ch.id}|${k}" value="${esc(ch[k])}" ${off}></label>`;
@@ -1383,8 +1414,9 @@
         <dt>תשלום</dt><dd>${paidLabel(w)}</dd>
         <dt>קבלה</dt><dd>${w.receipt === 'auto' ? `הופקה אוטומטית, מס׳ ${w.invoice}` : w.receipt === 'manual' ? `הופקה, מס׳ ${w.invoice}` : w.receipt === 'unpaid' ? 'לא שולמה' : 'דורשת קבלה ידנית'}</dd>
       </dl>
-      ${w.invoice ? refundLines(w.invoice) : ''}
-      ${isOwn(w) && w.invoice && refundable(w.invoice) ? `<button class="btn ghost block" data-act="refundOpen" data-inv="${w.invoice}">זיכוי</button>` : !isOwn(w) && w.invoice ? `<p class="muted small">החזר לסדנה מ"${esc(chName(w.source))}" מתבצע דרך הערוץ.</p>` : ''}
+      ${w.invoice ? `<div class="pay-row"><div class="btn-row">${pdfBtn(w.invoice, `חשבונית מס׳ ${w.invoice} (PDF)`)}${isOwn(w) && refundable(w.invoice) ? `<button class="btn ghost small" data-act="refundOpen" data-inv="${w.invoice}">זיכוי</button>` : ''}</div>${refundLines(w.invoice)}</div>` : ''}
+      ${!isOwn(w) && w.invoice ? `<p class="muted small">החזר לסדנה מ"${esc(chName(w.source))}" מתבצע דרך הערוץ.</p>` : ''}
+      ${isOwn(w) && w.invoice && w.status !== 'cancelled' && hoursTo(w) > 0 && hoursTo(w) < S.settings.workshopCancelHours ? `<button class="btn ghost block" data-act="lateOpen" data-id="${w.id}">פנייה מאוחרת מהלקוח (וואטסאפ)</button>` : ''}
       ${w.receipt === 'pending' ? `<a class="btn primary block" href="#/tamima/receipts/${w.id}" data-act="closeSheet">להפקת קבלה</a>` : ''}
       ${past ? (w.feedbackSent ? `<p class="ok-line">✓ מייל משוב נשלח</p>` : `<button class="btn ${w.receipt === 'pending' ? 'ghost' : 'primary'} block" data-act="feedback" data-id="${w.id}">שליחת מייל משוב</button>`)
         : `<p class="muted small">אחרי הסדנה יהיה אפשר לשלוח מייל משוב.</p>`}
@@ -1862,6 +1894,13 @@
       if (f.kind === 'ws') {
         const err = moveWorkshop(f.id, f.date, f.time);
         if (err) { f.err = err; renderSheet(); return; }
+        if (f.late) {
+          const w = workshop(f.id), cu = customerOf(w);
+          if (cu) cu.lateMoveUsed = todayIso();
+          const x = typeof f.late === 'string' && refundCase(f.late);
+          if (x) x.status = 'moved';
+          log('notify', `הזזה חד פעמית: ${w.customer.name}`, `נרשם בכרטיס הלקוח (${dmy(todayIso())}). החשבונית נשארת, ולא נפתח זיכוי.`);
+        }
         closeSheet(); render(); snack('הסדנה הוזזה. היומן והערוצים עודכנו, והלקוח קיבל מייל.');
         return;
       }
@@ -1874,32 +1913,80 @@
       runSync();
       closeSheet(); render(); snack(`המועד הוזז ל${shortDay(f.date)} ${f.time}.`);
     },
-    wsCancelAsk(d) { const w = workshop(d.id); openSheet(confirmHtml('לבטל את הסדנה?', `${esc(w.customer.name)}, ${longDay(w.date)} ${w.time}. הלקוח יקבל מייל, והמועד יחזור להיות פנוי.${w.invoice && refundable(w.invoice) ? ' אחרי הביטול ייפתח מסך הזיכוי.' : ''}`, 'wsCancel', `data-id="${w.id}"`, 'ביטול הסדנה')); },
+    wsCancelAsk(d) { const w = workshop(d.id); const paid = isOwn(w) && w.invoice && refundable(w.invoice); openSheet(confirmHtml('לבטל את הסדנה?', `${esc(w.customer.name)}, ${longDay(w.date)} ${w.time}. המועד יחזור להיות פנוי.${paid ? ' אחרי הביטול ייפתח מסך הזיכוי עם החזר מלא מוצע. המייל ללקוח יישלח אחרי ההחלטה שלך.' : ' הלקוח יקבל מייל.'}`, 'wsCancel', `data-id="${w.id}"`, 'ביטול הסדנה')); },
     wsCancel(d) {
       const w = workshop(d.id);
-      // סדנה ששולמה באתר: מסך הזיכוי נפתח מיד, ומייל הביטול יוצא עם ההחזר
-      if (w.invoice && refundable(w.invoice)) { setWorkshopCancelled(d.id, true, { mail: false }); render(); openRefund(w.invoice, w.id); return; }
+      // סדנה ששולמה באתר: תמימה ביטלה, ולכן מוצע החזר מלא בלי קשר למועד. שום החזר לא יוצא לפני ההחלטה שלה
+      if (isOwn(w) && w.invoice && refundable(w.invoice)) {
+        setWorkshopCancelled(d.id, true, { mail: false });
+        const x = openRefundCase({ inv: w.invoice, reason: 'studio', wsId: w.id, suggested: w.amount - refundedOf(w.invoice), why: 'תמימה ביטלה את הסדנה: מוצע החזר מלא, בלי קשר למועד.' });
+        render(); openCaseSheet(x.id); return;
+      }
       setWorkshopCancelled(d.id, true); closeSheet(); render(); snack('הסדנה בוטלה.', () => { const err = setWorkshopCancelled(d.id, false); if (err) snack(err); });
     },
     refundOpen(d) { openRefund(Number(d.inv)); },
+    caseOpen(d) { openCaseSheet(d.id); },
+    // פנייה מאוחרת (הלקוח פנה בוואטסאפ): מוצע 0 ₪, ומוצגת גם הזזה חד פעמית
+    lateOpen(d) {
+      const w = workshop(d.id);
+      openRefund(w.invoice, { wsId: w.id, late: true, reason: 'customer', suggested: 0, why: `פנייה בפחות מ-${S.settings.workshopCancelHours} שעות לפני הסדנה: לפי המדיניות אין החזר.` });
+    },
+    lateMove() {
+      const f = ui.rf, w = workshop(f.wsId);
+      ui.rf = null;
+      A.wsMoveOpen({ id: w.id });
+      ui.mvf.late = f.caseId || true;
+    },
     refundDo() {
       const f = ui.rf, info = invoiceInfo(f.inv);
       const left = info.amount - refundedOf(f.inv);
-      const amt = Math.round(Number(String(f.amount).replace(/[^\d.]/g, '')) * 100) / 100;
+      const raw = String(f.amount).trim();
+      const amt = Math.round(Number(raw.replace(/[^\d.]/g, '')) * 100) / 100;
       f.errField = 'amount';
       const bad = msg => { f.err = msg; renderSheet(); ui.focusSel = '#sheet [data-bind="rf.amount"]'; focusPending(); };
-      if (!(amt > 0)) { bad('נא למלא סכום גדול מאפס.'); return; }
-      if (amt > left + 0.001) { bad(`אפשר לזכות עד ${money(left)}, היתרה שעוד לא זוכתה בחשבונית הזו.`); return; }
-      const r = { id: uid('rf'), invoice: f.inv, amount: amt, date: todayIso(), creditNo: S.nextCredit++ };
+      if (!raw || !(amt > 0)) { bad('נא למלא סכום גדול מאפס.'); return; }
+      if (amt > left + 0.001) { bad(`אי אפשר לזכות יותר מ-${money(left)}, היתרה שעוד לא זוכתה בחשבונית הזו. סאמיט לא יאפשרו זיכוי גבוה יותר.`); return; }
+      // הקריאה היחידה לזיכוי בסאמיט, רק אחרי הלחיצה של תמימה
+      const res = sumitRefund({ customer: info.customer, token: info.token, amount: amt, invoice: f.inv, desc: `זיכוי לחשבונית מס׳ ${f.inv}` });
+      let x = f.caseId && refundCase(f.caseId);
+      if (!res.ok) {
+        if (!x) x = openRefundCase({ inv: f.inv, reason: f.reason, wsId: f.wsId, studentId: f.studentId, suggested: f.suggested, why: f.why, info: f.info, late: f.late });
+        Object.assign(x, { status: 'failed', error: res.error, amountTried: amt });
+        f.caseId = x.id;
+        log('sumit', 'סאמיט: הזיכוי נכשל', res.error);
+        email('refundFailed', toStudio(), `הזיכוי ל${info.name} לא בוצע`, ['שלום תמימה,', `הזיכוי של ${money(amt)} לחשבונית מס׳ ${f.inv} לא בוצע.`, res.error, 'הזיכוי מסומן "דורש טיפול" בבית.'], { cta: ['לטיפול', siteUrl('#/tamima/home')] });
+        toast('הזיכוי נכשל', `${info.name}: ${res.error}`);
+        f.errField = ''; f.err = `הזיכוי לא בוצע: ${res.error} הוא מסומן "דורש טיפול" בבית.`;
+        renderSheet(); return;
+      }
+      const r = { id: uid('rf'), invoice: f.inv, amount: amt, date: todayIso(), creditNo: res.creditNo, reason: f.reason || 'manual' };
       S.refunds.push(r);
-      log('sumit', `סאמיט: זיכוי ${money(amt)} לחשבונית ${f.inv}`, `${info.name}. ההחזר בוצע לכרטיס האשראי, והופקה חשבונית מס קבלה זיכוי מס׳ ${r.creditNo}.`);
-      if (f.wsId) wsCancelMail(info.w, r);
-      else email(info.kind === 'ws' ? 'refund' : 'refundStudent', info.to, `זיכוי ${money(amt)}, חשבונית מס קבלה זיכוי מס׳ ${r.creditNo}`, [`שלום ${info.name.split(' ')[0]},`, `בוצע זיכוי של ${money(amt)} עבור חשבונית מס קבלה מס׳ ${f.inv} (${info.desc}).`, 'ההחזר בוצע לכרטיס האשראי. מסמך זיכוי מצורף.']);
+      if (x) Object.assign(x, { status: 'done', refundId: r.id });
+      log('sumit', 'סאמיט: הזיכוי בוצע', `${info.name}, ${money(amt)}. ההחזר יצא לכרטיס האשראי, והופקה חשבונית מס קבלה זיכוי מס׳ ${r.creditNo}.`);
+      const w = f.wsId && workshop(f.wsId);
+      if (w) { if (w.status !== 'cancelled') dropWorkshop(w); wsCancelMail(w, r); }
+      else email(info.kind === 'ws' ? 'refund' : 'refundStudent', info.to, `זיכוי ${money(amt)}, חשבונית מס קבלה זיכוי מס׳ ${r.creditNo}`, [`שלום ${info.name.split(' ')[0]},`, `בוצע זיכוי של ${money(amt)} עבור חשבונית מס קבלה מס׳ ${f.inv} (${info.desc}).`, 'ההחזר בוצע לכרטיס האשראי. מסמך זיכוי מצורף.'], { extra: creditMailHtml(r) });
       ui.rf = null;
       closeSheet(); render();
       snack(`הזיכוי בוצע: ${money(amt)}. מסמך זיכוי מס׳ ${r.creditNo}.`);
     },
-    refundSkip() { const w = workshop(ui.rf.wsId); ui.rf = null; wsCancelMail(w, null); closeSheet(); render(); snack('הסדנה בוטלה בלי זיכוי.'); },
+    // ללא החזר: אין קריאה לסאמיט. בסדנה, הלקוח מקבל "הסדנה בוטלה" בלי אזכור של החזר
+    refundSkip() {
+      const f = ui.rf, x = f.caseId && refundCase(f.caseId);
+      if (x) x.status = 'none';
+      const w = f.wsId && workshop(f.wsId);
+      if (w) { if (w.status !== 'cancelled') dropWorkshop(w); wsCancelMail(w, null); }
+      if (x || w) log('notify', 'החלטה: ללא החזר', `${invoiceInfo(f.inv).name}, חשבונית מס׳ ${f.inv}. לא נשלחה קריאה לסאמיט.`);
+      ui.rf = null; closeSheet(); render();
+      snack(w ? 'הסדנה בוטלה בלי החזר. הלקוח קיבל מייל.' : 'סומן: ללא החזר.');
+    },
+    // אחר כך: הזיכוי נשאר ב"ממתין לך עכשיו"
+    refundLater() {
+      const f = ui.rf;
+      if (!f.caseId) openRefundCase({ inv: f.inv, reason: f.reason, wsId: f.wsId, studentId: f.studentId, suggested: f.suggested, why: f.why, info: f.info, late: f.late });
+      ui.rf = null; closeSheet(); render();
+      snack('הזיכוי ממתין להחלטה ב"ממתין לך עכשיו".');
+    },
     creditDoc(d) { const r = S.refunds.find(x => x.id === d.id); if (r) openSheet(() => creditDocHtml(r)); },
     wsRestore(d) { const err = setWorkshopCancelled(d.id, false); closeSheet(); render(); snack(err || 'הסדנה חזרה ליומן.'); },
 
@@ -1933,9 +2020,9 @@
     issueReceipt(d) {
       const w = workshop(d.id);
       const amount = Number(String(ui.rcpt.amount).replace(/[^\d.]/g, '')) || w.amount;
-      w.receipt = 'manual'; w.invoice = S.nextInvoice++; w.customer.name = ui.rcpt.name.trim() || w.customer.name; ui.rcpt.amount = amount;
+      w.customer.name = ui.rcpt.name.trim() || w.customer.name; ui.rcpt.amount = amount;
+      w.receipt = 'manual'; w.invoice = sumitCreateDocument(w.customer, wsDesc(w), amount);
       if (w.eventId) G.events.patch({ calendarId: CAL.studio, eventId: w.eventId, requestBody: { summary: X.workshopEvent(w).summary, extendedProperties: { private: { receipt: String(w.invoice) } } } });
-      log('sumit', `סאמיט: הופקה חשבונית מס קבלה מס׳ ${w.invoice}`, `${w.customer.name}, ${money(amount)}, סדנה מהסלון ${shortDay(w.date)}.`);
       email('receipt', toCustomer(w), `חשבונית מס קבלה מס׳ ${w.invoice}`, [`שלום ${w.customer.name.split(' ')[0]},`, `מצורפת חשבונית מס קבלה מס׳ ${w.invoice} עבור הסדנה ב${longDay(w.date)}.`]);
       render(); scrollTop();
     },

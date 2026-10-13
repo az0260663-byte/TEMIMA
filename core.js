@@ -22,8 +22,10 @@
   const APP_MODE = document.body.dataset.app || 'demo';
   const PORTAL = (() => {
     if (APP_MODE === 'demo') return null;
-    const k = new URLSearchParams(location.search).get('k') || '';
-    return { kind: APP_MODE, k: APP_MODE === 'student' && /^[a-z0-9]{8,40}$/.test(k) ? k : null };
+    const q = new URLSearchParams(location.search), k = q.get('k') || '', b = q.get('b') || '';
+    const ok = v => /^[a-z0-9]{8,40}$/.test(v);
+    // b: הקישור האישי של לקוח להזמנה שלו ("ההזמנה שלי")
+    return { kind: APP_MODE, k: APP_MODE === 'student' && ok(k) ? k : null, b: APP_MODE === 'site' && ok(b) ? b : null };
   })();
   // כל דף מציג רק את האזור שלו
   const PORTAL_ROLE = { site: ['client', '#/client'], student: ['student', '#/student/home'], studio: ['tamima', '#/tamima/home'] };
@@ -130,25 +132,51 @@
   function eventJson(ev, calendarId) {
     return `<details class="json"><summary>משאב Event ב-Google Calendar</summary><p class="small muted" dir="ltr">calendarId: ${esc(calendarId)}</p><pre dir="ltr">${esc(JSON.stringify(ev, null, 2))}</pre></details>`;
   }
-  // כרטיס לקוח: לקוח שחוזר (לפי מייל או טלפון) נוסף לאותו כרטיס
-  const digitsOf = p => String(p || '').replace(/\D/g, '');
-  function customerFor(c) {
+  /* ---------- כרטיס לקוח ----------
+     כל הזמנה (אתר וסלון) מקושרת ללקוח לפי טלפון מנורמל: בלי רווחים ומקפים, ו-972+ הופך ל-0.
+     טלפון שונה עם אותו מייל לא מאוחד לבד. תמימה רואה "אולי זה אותו לקוח?" ומחליטה. */
+  const normPhone = p => { let d = String(p || '').replace(/\D/g, ''); if (d.startsWith('972')) d = '0' + d.slice(3); return d; };
+  const customer = id => (S.customers || []).find(x => x.id === id);
+  const customerOf = w => w && customer(w.customerId);
+  function customerFor(c, extra = {}) {
     if (!c || !c.name) return null;
     if (!S.customers) S.customers = [];
-    const mail = String(c.email || '').trim().toLowerCase(), ph = digitsOf(c.phone);
-    let x = S.customers.find(k => (mail && k.email.toLowerCase() === mail) || (ph && digitsOf(k.phone) === ph));
-    if (!x) { x = { id: uid('c'), name: c.name, phone: c.phone || '', email: c.email || '', since: todayIso() }; S.customers.push(x); }
-    else { if (!x.email && c.email) x.email = c.email; if (!x.phone && c.phone) x.phone = c.phone; }
+    const ph = normPhone(c.phone);
+    let x = ph ? S.customers.find(k => k.phones.includes(ph)) : null;
+    if (!x) {
+      x = { id: uid('c'), name: c.name, phones: ph ? [ph] : [], email: c.email || '', sumitId: '', token: '', lateMoveUsed: '', studentId: null, since: todayIso(), notSame: [] };
+      S.customers.push(x);
+      const twin = mergeCandidates(x)[0];
+      if (twin) log('notify', `אולי זה אותו לקוח? ${x.name}`, `אותו מייל כמו ${twin.name}, עם טלפון אחר. אפשר לאחד בכרטיס הלקוח.`);
+    } else if (!x.email && c.email) x.email = c.email;
+    Object.assign(x, extra);
     return x;
   }
-  const customerWorkshops = id => S.workshops.filter(w => w.customerId === id).sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
+  // לקוחות עם אותו מייל וטלפון אחר, שתמימה עוד לא סימנה שהם לא אותו אדם
+  const mergeCandidates = x => (S.customers || []).filter(k => k.id !== x.id && x.email && k.email && k.email.toLowerCase() === x.email.toLowerCase() && !(x.notSame || []).includes(k.id) && !(k.notSame || []).includes(x.id));
+  // איחוד: כל ההזמנות והחשבוניות עוברות לכרטיס אחד, שני הטלפונים נשמרים, וגם הזזה חד פעמית שנוצלה
+  function mergeCustomers(keepId, dropId) {
+    const k = customer(keepId), d = customer(dropId);
+    if (!k || !d || k === d) return;
+    S.workshops.forEach(w => { if (w.customerId === d.id) w.customerId = k.id; });
+    k.phones = [...new Set(k.phones.concat(d.phones))];
+    if (!k.email) k.email = d.email;
+    if (!k.sumitId) k.sumitId = d.sumitId;
+    if (!k.token) k.token = d.token;
+    if (!k.studentId) k.studentId = d.studentId;
+    if (d.lateMoveUsed && (!k.lateMoveUsed || d.lateMoveUsed > k.lateMoveUsed)) k.lateMoveUsed = d.lateMoveUsed;
+    S.customers = S.customers.filter(x => x.id !== d.id);
+    S.customers.forEach(x => { x.notSame = (x.notSame || []).filter(i => i !== d.id); });
+    log('notify', `כרטיסי לקוח אוחדו: ${k.name}`, `ההזמנות והחשבוניות של ${d.name} עברו לכרטיס אחד.`);
+  }
+  const customerWorkshops = id => S.workshops.filter(w => w.customerId === id && !['pending', 'expired'].includes(w.status)).sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
 
   // כתיבת סדנה: נתוני האפליקציה, אירוע ביומן הסטודיו, והמשבצת נמחקת מכל יומני הערוצים
   function bookWorkshop(w) {
     const c = customerFor(w.customer);
     if (c) w.customerId = c.id;
     w.eventId = w.eventId || G.newId();
-    S.workshops.push(w);
+    if (!S.workshops.includes(w)) S.workshops.push(w);
     G.events.insert({ calendarId: CAL.studio, requestBody: X.workshopEvent(w) });
     return G.channels.book(w.date, w.time);
   }
@@ -195,35 +223,50 @@
     return slotsOn(date).filter(x => x.channel === HOME && free.includes(x.time) && at(date, x.time) - now() >= notice && !heldByOther(date, x.time, own)).map(x => x.time);
   }
 
-  /* ---------- שמירת מועד בזמן התשלום ----------
-     כשלקוח עובר לתשלום, המועד נשמר לו ל-5 דקות ולא מוצע לאף אחד אחר.
-     אם לא שילם בזמן הזה, המועד משתחרר וחוזר להיות פנוי. */
+  /* ---------- הזמנה שממתינה לתשלום ----------
+     "לתשלום" יוצר הזמנה בסטטוס "ממתין לתשלום", והמועד נשמר לה ל-5 דקות ולא מוצע לאף אחד אחר.
+     תשלום שנכשל משאיר אותה ממתינה, ואפשר לנסות שוב. אחרי 5 דקות בלי תשלום היא פגה, והמועד משתחרר.
+     "שולם" מסומן רק אחרי הודעת שרת מסאמיט (IPN) ואימות התשלום, לא מדף התודה. */
   const HOLD_MIN = 5;
-  const holdOf = id => (S.holds || []).find(h => h.id === id && h.until > now().getTime());
-  const heldByOther = (date, time, own) => (S.holds || []).some(h => h.date === date && h.time === time && h.id !== own && h.until > now().getTime());
-  function holdSlot(date, time, own) {
-    const cur = holdOf(own);
-    if (cur && cur.date === date && cur.time === time) return cur;
-    releaseHold(own);
-    const h = { id: uid('h'), date, time, until: now().getTime() + HOLD_MIN * 6e4 };
-    S.holds = (S.holds || []).concat(h);
-    log('sync', `${shortDay(date)} ${time} נשמר ללקוח ל-${HOLD_MIN} דקות`, 'הלקוח עבר לתשלום. בזמן הזה המועד לא מוצע לאף אחד אחר.');
-    return h;
+  const pendingOrder = id => S.workshops.find(w => w.id === id && w.status === 'pending' && w.holdUntil > now().getTime());
+  const holdOf = pendingOrder;
+  const heldByOther = (date, time, own) => S.workshops.some(w => w.status === 'pending' && w.date === date && w.time === time && w.id !== own && w.holdUntil > now().getTime());
+  function createOrder(o, prevId) {
+    const prev = pendingOrder(prevId);
+    if (prev && prev.date === o.date && prev.time === o.time && prev.n === o.n) { Object.assign(prev.customer, o.customer); return prev; }
+    expireOrder(prevId, true);
+    const w = { id: uid('w'), source: HOME, status: 'pending', date: o.date, time: o.time, n: o.n, amount: price(o.n), customer: o.customer, k: token(),
+      holdUntil: now().getTime() + HOLD_MIN * 6e4, receipt: 'auto', invoice: null, feedbackSent: false, created: todayIso() };
+    S.workshops.push(w);
+    log('sync', `הזמנה חדשה ממתינה לתשלום: ${shortDay(w.date)} ${w.time}`, `${w.customer.name}. המועד שמור לה ל-${HOLD_MIN} דקות, ובזמן הזה לא מוצע לאף אחד אחר.`);
+    sumitBeginRedirect({ id: w.id, customer: w.customer, amount: w.amount, desc: wsDesc(w) });
+    return w;
   }
-  function releaseHold(id) { if (id && S.holds) S.holds = S.holds.filter(h => h.id !== id); }
+  function expireOrder(id, quiet) {
+    const w = S.workshops.find(x => x.id === id && x.status === 'pending');
+    if (!w) return;
+    w.status = 'expired';
+    if (!quiet) log('sync', `${shortDay(w.date)} ${w.time} שוחרר`, `עברו ${HOLD_MIN} דקות בלי תשלום. ההזמנה פגה, והמועד חזר להיות פנוי.`);
+  }
+  const releaseHold = id => expireOrder(id, true);
   function pruneHolds() {
     const n = now().getTime();
-    (S.holds || []).filter(h => h.until <= n).forEach(h => log('sync', `${shortDay(h.date)} ${h.time} שוחרר`, `עברו ${HOLD_MIN} דקות בלי תשלום, והמועד חזר להיות פנוי.`));
-    if (S.holds) S.holds = S.holds.filter(h => h.until > n);
+    S.workshops.filter(w => w.status === 'pending' && w.holdUntil <= n).forEach(w => expireOrder(w.id));
   }
+  const wsDesc = w => `סדנת קרמיקה, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}`;
 
-  // סאמיט שולח למערכת אישור תשלום (בגרסה האמיתית: הודעת שרת מסאמיט).
-  // רק אז המועד נסגר ביומן והקבלה נשמרת בכרטיס הלקוח
-  function sumitPaid(p) {
-    releaseHold(p.holdId);
-    const w = { id: uid('w'), source: HOME, date: p.date, time: p.time, n: p.n, amount: p.amount, customer: p.customer, receipt: 'auto', invoice: p.invoice, paidAt: todayIso(), feedbackSent: false };
+  // הודעת שרת מסאמיט (IPN): המערכת מאמתת את התשלום מול סאמיט, ורק אז ההזמנה "שולם", המועד נסגר ביומן והקבלה נשמרת בכרטיס הלקוח
+  function sumitIpn(paymentId) {
+    const p = sumitGetPayment(paymentId);
+    const w = p && S.workshops.find(x => x.id === p.ExternalIdentifier);
+    if (!p || !p.ValidPayment || !w) { log('sumit', 'הודעת שרת מסאמיט נדחתה', 'התשלום לא אומת, ולכן ההזמנה לא סומנה "שולם".'); return null; }
+    if (w.status !== 'pending' && w.status !== 'expired') return w;   // הודעה כפולה
+    Object.assign(w, { status: 'confirmed', invoice: p.DocumentNumber, token: p.PaymentMethod.CreditCard_Token, paidAt: todayIso() });
+    delete w.holdUntil;
     const removed = bookWorkshop(w);
-    log('sumit', 'סאמיט שלח למערכת אישור תשלום וקבלה', `חשבונית מס קבלה מס׳ ${p.invoice} התקבלה ונשמרה בכרטיס הלקוח של ${w.customer.name}.`);
+    const cu = customerOf(w);
+    if (cu) { cu.token = w.token; if (!cu.sumitId) cu.sumitId = p.CustomerID; }
+    log('sumit', 'הודעת שרת מסאמיט: התשלום אומת', `ההזמנה סומנה "שולם". חשבונית מס קבלה מס׳ ${w.invoice} נשמרה בכרטיס הלקוח של ${w.customer.name}.`);
     // רק משבצות של ערוצים אחרים (לא של האתר עצמו) נזכרות כאן
     const others = [...new Set(removed.filter(x => x.channel !== HOME).map(x => chName(x.channel)))];
     log('sync', 'היומן עודכן', `המשבצת ${shortDay(w.date)} ${w.time} נסגרה ולא תוצע יותר באתר${others.length ? `, וגם הוסרה מיומן ${others.map(n => `"${n}"`).join(' ומיומן ')}` : ''}.`);
@@ -353,18 +396,20 @@
     return `<ol class="steps">${list.map((x, j) => `<li class="${j < i ? 'done' : j === i ? 'on' : ''}"><span>${j + 1}</span>${x[1]}</li>`).join('')}</ol>`;
   }
 
-  function sumitView(amount, desc, payAct, backAct) {
+  // דף התשלום של סאמיט (מדומה). failAct: הדגמה של תשלום שנכשל
+  function sumitView(amount, desc, payAct, backAct, failAct, before = '', opts = {}) {
     return `<div class="sumit">
       <div class="sumit-head"><div><b>סאמיט</b><small>תשלום מאובטח</small></div><span class="demo-badge">דמו, אין חיוב</span></div>
       <div class="sumit-amount"><small>${esc(desc)}</small><b>${money(amount)}</b><small>לתשלום לסטודיו של תמימה</small></div>
-      <p class="sumit-method">תשלום בכרטיס אשראי</p>
+      <p class="sumit-method">תשלום בכרטיס אשראי</p>${before}
         <label class="field"><span>מספר כרטיס</span><input inputmode="numeric" placeholder="0000 0000 0000 0000" autocomplete="off"></label>
         <div class="two">
           <label class="field"><span>תוקף</span><input placeholder="MM/YY" autocomplete="off"></label>
           <label class="field"><span>CVV</span><input inputmode="numeric" placeholder="000" autocomplete="off"></label>
         </div>
         <p class="hint">בדמו אפשר להשאיר ריק וללחוץ על תשלום.</p>
-      <button class="btn primary block" data-act="${payAct}">תשלום ${money(amount)}</button>
+      <button class="btn primary block" data-act="${payAct}" ${opts.payDisabled ? 'disabled' : ''}>תשלום ${money(amount)}</button>
+      ${failAct ? `<button class="btn ghost block" data-act="${failAct}">הדגמה: התשלום נכשל</button>` : ''}
       <button class="btn ghost block" data-act="${backAct}">חזרה</button>
     </div>`;
   }
@@ -376,9 +421,9 @@
   // פרטי חשבונית: כרטיסייה של סטודנט, או סדנה מהאתר (לסדנה מהסלון אין זיכוי, ההחזר דרך הסלון)
   function invoiceInfo(inv) {
     const p = S.payments.find(x => x.invoice === inv);
-    if (p) { const s = student(p.studentId); return { inv, kind: 'card', p, s, amount: p.amount, date: p.date, name: s.name, to: toStudent(s), desc: `כרטיסייה, ${S.settings.cardSize} שיעורים` }; }
+    if (p) { const s = student(p.studentId); return { inv, kind: 'card', p, s, amount: p.amount, date: p.date, name: s.name, to: toStudent(s), customer: s, token: s.token || '', desc: `כרטיסייה, ${S.settings.cardSize} שיעורים` }; }
     const w = S.workshops.find(x => x.invoice === inv && isOwn(x));
-    if (w) return { inv, kind: 'ws', w, amount: w.amount, date: w.paidAt || w.date, name: w.customer.name, to: toCustomer(w), desc: `סדנת קרמיקה, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}` };
+    if (w) return { inv, kind: 'ws', w, amount: w.amount, date: w.paidAt || w.date, name: w.customer.name, to: toCustomer(w), customer: w.customer, token: w.token || (customerOf(w) || {}).token || '', desc: wsDesc(w) };
     return null;
   }
   const refundable = inv => { const i = invoiceInfo(inv); return !!i && refundedOf(inv) < i.amount; };
@@ -404,7 +449,7 @@
     return { amount: 0, why: 'כל השיעורים בכרטיסייה הזו כבר נוצלו.' };
   }
   // שורות "זוכה X ₪ · מסמך זיכוי מס׳ Y" ליד החשבונית המקורית
-  const refundLines = inv => refundsOf(inv).map(r => `<button class="refund-line" data-act="creditDoc" data-id="${r.id}">זוכה ${money(r.amount)} · מסמך זיכוי מס׳ ${r.creditNo}</button>`).join('');
+  const refundLines = inv => refundsOf(inv).map(r => `<button class="refund-line" data-act="pdf" data-credit="${r.id}">זוכה ${money(r.amount)} · מסמך זיכוי מס׳ ${r.creditNo}</button>`).join('');
   function creditDocHtml(r) {
     const info = invoiceInfo(r.invoice);
     return `<div class="invoice credit">
@@ -420,11 +465,67 @@
     </div>`;
   }
   // מייל ביטול סדנה: עם החזר (ומסמך זיכוי) או בלי
+  // נשלח רק אחרי ההחלטה של תמימה: עם החזר ומסמך זיכוי, או "הסדנה בוטלה" בלי אזכור של החזר
   function wsCancelMail(w, refund) {
     email('wsCancelled', toCustomer(w), 'הסדנה בוטלה', [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה ב${longDay(w.date)}, ${w.time} בוטלה.`,
-      refund ? `ההחזר בוצע לכרטיס האשראי (${money(refund.amount)}). מסמך זיכוי מצורף: חשבונית מס קבלה זיכוי מס׳ ${refund.creditNo}.` : '',
-      'נשמח לקבוע מועד אחר.'].filter(Boolean));
+      refund ? `ההחזר בוצע לכרטיס האשראי (${money(refund.amount)}). מסמך זיכוי מצורף.` : '',
+      'נשמח לקבוע מועד אחר.'].filter(Boolean), refund ? { extra: creditMailHtml(refund) } : {});
   }
+  function creditMailHtml(r) {
+    const row = (k, v) => `<tr><td style="padding:4px 0;color:#6c5f55;width:110px">${k}</td><td style="padding:4px 0">${v}</td></tr>`;
+    return `<div style="margin:18px 0;border:1px solid #e6dccd;border-radius:12px;padding:16px;background:#fff" dir="rtl">
+      <div style="font-weight:bold;margin-bottom:8px">חשבונית מס קבלה זיכוי מס׳ ${r.creditNo}</div>
+      <table style="border-collapse:collapse;font-size:14px;width:100%">${row('תאריך', `${dmy(r.date)}.${parse(r.date).getFullYear()}`)}${row('פירוט', `זיכוי לחשבונית מס׳ ${r.invoice}`)}${row('סכום', `<b>−${money(r.amount)}</b>`)}${row('אמצעי', 'זיכוי לכרטיס האשראי (סאמיט)')}</table></div>`;
+  }
+
+  /* ---------- זיכוי ממתין להחלטה ----------
+     המערכת אף פעם לא מחזירה כסף לבד. היא רק פותחת לתמימה כרטיס עם סכום מוצע, או בלי סכום.
+     ההחזר יוצא רק כשתמימה לוחצת "ביצוע זיכוי". */
+  const REFUND_REASON = { customer: 'ביטול לקוח', studio: 'ביטול סטודיו', leave: 'עזיבה', stop: 'הפסקת השתתפות', manual: 'ידני' };
+  const refundCase = id => (S.refundCases || []).find(x => x.id === id);
+  const openRefundCases = () => (S.refundCases || []).filter(x => x.status === 'open' || x.status === 'failed');
+  function openRefundCase(o) {
+    if (!S.refundCases) S.refundCases = [];
+    const same = S.refundCases.find(x => (x.status === 'open' || x.status === 'failed') && x.inv === o.inv && x.reason === o.reason && (x.wsId || null) === (o.wsId || null));
+    if (same) return same;
+    const x = Object.assign({ id: uid('rc'), status: 'open', created: todayIso(), suggested: null, why: '', info: '', wsId: null, studentId: null, late: false }, o);
+    S.refundCases.push(x);
+    log('notify', `זיכוי ממתין להחלטה: ${REFUND_REASON[x.reason]}`, 'המערכת פתחה את הזיכוי לתמימה. ההחזר יוצא רק אחרי אישור שלה.');
+    return x;
+  }
+
+  /* ---------- ביטול והזזה של סדנה (משותף לאתר ולניהול) ---------- */
+  const bookingUrl = w => { if (!w.k) w.k = token(); return `${pageUrl('index.html')}?b=${w.k}#/client/booking`; };
+  function dropWorkshop(w) {
+    w.status = 'cancelled';
+    try { G.events.delete({ calendarId: CAL.studio, eventId: w.eventId }); } catch (e) { /* כבר נמחק */ }
+    runSync();
+  }
+  function patchWsEvent(w, fields) {
+    const body = X.workshopEvent(w);
+    G.events.patch({ calendarId: CAL.studio, eventId: w.eventId, requestBody: Object.fromEntries(fields.map(k => [k, body[k]])) });
+  }
+  // הזזה למועד פנוי באתר (הלקוח בעצמו, יותר מ-48 שעות לפני)
+  function shiftWorkshop(w, date, time) {
+    const from = `${shortDay(w.date)} ${w.time}`;
+    w.date = date; w.time = time;
+    patchWsEvent(w, ['start', 'end']);
+    G.channels.book(date, time);
+    runSync();
+    email('moved', toCustomer(w), `הסדנה הוזזה ל${shortDay(date)} ${time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה הוזזה ל${longDay(date)}, ${time} עד ${endOf(time)} (במקום ${from}).`, `הכתובת: ${S.content.address}.`], { cta: ['לניהול ההזמנה', bookingUrl(w)] });
+    return from;
+  }
+  const hoursTo = w => (at(w.date, w.time) - now()) / 36e5;
+
+  // מסמך לפי מספר: חשבונית של כרטיסייה או של סדנה (מהאתר או מהסלון)
+  function docHtml(inv) {
+    const p = S.payments.find(x => x.invoice === inv);
+    if (p) return invoiceDoc(inv, student(p.studentId).name, `כרטיסייה, ${S.settings.cardSize} שיעורים`, p.amount, p.date);
+    const w = S.workshops.find(x => x.invoice === inv);
+    return w ? invoiceDoc(inv, w.customer.name, wsDesc(w), w.amount, w.paidAt || w.date) : '';
+  }
+  // כפתור PDF ליד חשבונית או מסמך זיכוי
+  const pdfBtn = (inv, label) => `<button class="btn ghost small" data-act="pdf" data-inv="${inv}" aria-label="PDF של חשבונית ${inv}">${label || 'PDF'}</button>`;
 
   function invoiceDoc(inv, name, desc, amount, date) {
     return `<div class="invoice">
@@ -482,7 +583,12 @@
     makeupGranted: ['סטודנטים', 'השלמה חדשה'],
     makeupExpiring: ['סטודנטים', 'השלמה תפוג בעוד שבוע'],
     closure: ['סטודנטים', 'הסטודיו סגור'],
+    leaveConfirm: ['סטודנטים', 'אישור הודעת עזיבה'],
+    policyLink: ['סטודנטים', 'קישור לאישור המדיניות'],
     newBooking: ['תמימה', 'הזמנה חדשה'],
+    customerCancel: ['תמימה', 'לקוח ביטל סדנה'],
+    refundFailed: ['תמימה', 'זיכוי נכשל'],
+    leaveAlert: ['תמימה', 'הודעת עזיבה של סטודנט'],
     newLead: ['תמימה', 'פנייה חדשה לקורס'],
     conflict: ['תמימה', 'התנגשות ביומן'],
     test: ['תמימה', 'מייל בדיקה']
@@ -604,7 +710,7 @@
   }
 
   // לוח שנה קטן לבחירת יום: שבוע בכל שורה. ימים עם מועד פנוי ניתנים ללחיצה, ושאר הימים מעומעמים
-  function dayPlan(avail, selected) {
+  function dayPlan(avail, selected, act = 'bkDate') {
     if (!avail.length) return '';
     const set = new Set(avail);
     const first = parse(avail[0]), last = parse(avail[avail.length - 1]);
@@ -614,7 +720,7 @@
     for (let d = from; d <= to; d = addDays(d, 1)) {
       const k = iso(d);
       const mon = d.getDate() === 1 ? `<small>${MONTHS[d.getMonth()]}</small>` : '';
-      if (set.has(k)) cells.push(`<button class="daycell${k === selected ? ' on' : ''}" data-act="bkDate" data-date="${k}" aria-label="${longDay(k)}" ${k === selected ? 'aria-pressed="true"' : 'aria-pressed="false"'}><b>${d.getDate()}</b>${mon}</button>`);
+      if (set.has(k)) cells.push(`<button class="daycell${k === selected ? ' on' : ''}" data-act="${act}" data-date="${k}" aria-label="${longDay(k)}" ${k === selected ? 'aria-pressed="true"' : 'aria-pressed="false"'}><b>${d.getDate()}</b>${mon}</button>`);
       else cells.push(`<span class="daycell off" aria-hidden="true">${k < todayIso() ? '' : `<b>${d.getDate()}</b>${mon}`}</span>`);
     }
     return `<p class="dayplan-month">${months}</p>
@@ -632,7 +738,9 @@
      ולכן כל המסכים (תמימה, סטודנט, אתר, יומן, מדדים) מתעדכנים ברינדור הבא.
      ========================================================= */
   const activeGroups = () => S.groups.filter(g => g.active !== false).sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
-  const activeWorkshops = () => S.workshops.filter(w => w.status !== 'cancelled');
+  // סדנה שממתינה לתשלום, או שפג תוקפה, עדיין לא קיימת ביומן ולא נספרת
+  const isLive = w => !['cancelled', 'pending', 'expired'].includes(w.status);
+  const activeWorkshops = () => S.workshops.filter(isLive);
   const EMAIL_OK = v => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v).trim());
   // שעות החוגים לאתר, נגזרות מהקבוצות (משתנה אוטומטית כשתמימה עורכת קבוצה)
   function classDaysText() {
@@ -690,7 +798,6 @@
     if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
   }
   function closeSheet() {
-    if (ui.rf && ui.rf.wsId) { const w = workshop(ui.rf.wsId); ui.rf = null; if (w) wsCancelMail(w, null); }
     ui.rf = null;
     ui.sheet = null;
     renderSheet();
@@ -721,6 +828,13 @@
     toastClose() { $('#toast').classList.remove('show'); },
     flashClose() { ui.stuMsg = null; render(); },
     moreTab(d) { ui.moreTab = d.t; render(); },
+    pdf(d) {
+      const r = d.credit && S.refunds.find(x => x.id === d.credit);
+      const no = r ? r.creditNo : Number(d.inv);
+      const html = r ? creditDocHtml(r) : docHtml(no);
+      if (!html) return;
+      if (!sumitPdf(no, html, r ? `חשבונית מס קבלה זיכוי ${no}` : `חשבונית מס קבלה ${no}`)) openSheet(() => html);
+    },
     chToggle(d) { ui.chOpen[d.id] = !ui.chOpen[d.id]; if (ui.chMsg && ui.chMsg.id === d.id) ui.chMsg = null; render(); ui.focusSel = `[data-act="chToggle"][data-id="${d.id}"]`; focusPending(); },
 
   };

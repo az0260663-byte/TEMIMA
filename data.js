@@ -89,7 +89,10 @@
       cardSize: 4,
       workshopCancelHours: 48, // ❓ לאמת
       lessonCancelHours: 24,
-      defaultMax: 6
+      defaultMax: 6,
+      whatsapp: '050-0000000',    // ❓ מספר הוואטסאפ של תמימה (לפניות של לקוחות)
+      stopParticipationFee: 200,  // ניכוי בהפסקת השתתפות ביוזמת הסטודיו
+      policyVersion: '26-27'      // גרסת מדיניות הביטולים שהסטודנט מאשר
     };
 
     const groups = [
@@ -98,8 +101,12 @@
       { id: 'tue', name: 'קבוצת שלישי', day: 2, start: '17:30', end: '20:00', max: 6, active: true }
     ];
 
-    // דמו ריק: מתחילים בלי סטודנטים. תמימה מוסיפה אותם במערכת, או שהם נרשמים דרך האתר
-    const rows = [];
+    // נתוני הדגמה: שני סטודנטים (אישה וגבר), כל אחד מראה מצב תשלום אחר. תמימה מוסיפה עוד במערכת או דרך האתר
+    // [שם, קבוצה, שיעורים שנוצלו, הכרטיסייה הבאה שולמה, נשלחה דרישת תשלום]
+    const rows = [
+      ['נועה לוי', 'mon', 3, false, true],   // אחרי שיעור 3: נשלחה דרישת תשלום
+      ['דניאל כהן', 'sun', 4, false, false]  // שיעור 4 בלי תשלום: דורש טיפול
+    ];
     const counters = { sun: 0, mon: 0, tue: 0 };
     const students = rows.map(([name, groupId, used, nextPaid, requestSent], i) => {
       counters[groupId]++;
@@ -174,7 +181,12 @@
       return time ? { date, time } : null;
     }
     const price = n => (n === 2 ? settings.price2 : n * settings.pricePer);
-    const ws = []; // אין עדיין סדנאות
+    // נתוני הדגמה: שתי סדנאות (אישה וגבר). [ימים מהיום, שעה מועדפת, ערוץ, משתתפים, שם]
+    const ws = [
+      [3, '12:30', 'site', 3, 'מיכל אברהם'],   // קרובה, מהאתר: שולמה וקבלה אוטומטית
+      [-3, '15:00', 'salon', 4, 'יוסי מזרחי']  // עברה, מהסלון: מחכה לקבלה ידנית
+    ];
+    const customers = [];
     ws.forEach(([off, t, source, n, name], i) => {
       const p = place(off, t);
       if (!p) return;
@@ -187,6 +199,11 @@
         invoice: source === 'site' ? invoice++ : null,
         feedbackSent: past && source === 'site'
       });
+      // כרטיס לקוח לכל מי שהזמין, כמו בהזמנה אמיתית
+      const w = workshops[workshops.length - 1];
+      const c = { id: `c${i + 1}`, name, phones: [w.customer.phone.replace(/\D/g, '')], email: w.customer.email, sumitId: '', token: '', lateMoveUsed: '', studentId: null, since: p.date < iso(today) ? p.date : iso(today), notSame: [] };
+      customers.push(c);
+      w.customerId = c.id;
     });
 
     // בלי אירועים לדוגמה ביומן הסטודיו וביומן האישי
@@ -250,10 +267,12 @@
 
     return {
       settings, groups, students, lessons, attendance, makeups, payments,
-      workshops, content, leads: [], log: [], nextInvoice: invoice, seq: 1,
-      customers: [],    // כרטיסי לקוחות: { id, name, phone, email, since }
-      holds: [],        // מועדים שמורים בזמן תשלום: { id, date, time, until }
-      refunds: [],      // זיכויים: { invoice, amount, date, creditNo }
+      workshops, content, log: [],
+      // נתוני הדגמה: פנייה חדשה לקורס מהאתר, מחכה שתמימה תחזור אליה
+      leads: [{ id: 'ld1', name: 'שירה גולן', phone: '054-7781203', email: 'lead1@example.com', group: 'tue', handled: false, status: 'new', at: iso(addDays(today, -1)) }], nextInvoice: invoice, seq: 1,
+      customers,        // כרטיסי לקוחות: { id, name, phones, email, sumitId, token, lateMoveUsed, studentId, since }
+      refundCases: [],  // זיכוי ממתין להחלטה: { id, inv, reason, suggested, status, wsId, studentId }
+      refunds: [],      // זיכויים: { invoice, amount, date, creditNo, reason }
       nextCredit: 5001  // מספור נפרד למסמכי זיכוי
     };
   }

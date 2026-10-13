@@ -17,7 +17,7 @@
   const trace = { label: 'טעינת הדמו', calls: [], cacheHits: 0 };
   function beginStep(label) { trace.label = label; trace.calls = []; trace.cacheHits = 0; }
   G.onCall = c => { if (trace.calls.length < 500) trace.calls.push(c); };
-  const PAGE_NAMES = { 'tamima/student': 'תמימה: כרטיס סטודנט', 'compliance/': 'תאימות ואבטחה', 'client/accessibility': 'אתר: הצהרת נגישות', 'client/privacy': 'אתר: מדיניות פרטיות', 'client/': 'אתר: בית', 'client/workshop': 'אתר: הזמנת סדנה', 'client/course': 'אתר: קורס', 'tamima/home': 'תמימה: בית', 'tamima/calendar': 'תמימה: יומן', 'tamima/classes': 'תמימה: חוגים', 'tamima/workshops': 'תמימה: סדנאות', 'tamima/receipts': 'תמימה: קבלות', 'tamima/more': 'תמימה: עוד', 'student/home': 'סטודנט: בית', 'student/lessons': 'סטודנט: שיעורים', 'student/payments': 'סטודנט: תשלומים', 'student/makeup': 'סטודנט: השלמה', 'student/pay': 'סטודנט: תשלום' };
+  const PAGE_NAMES = { 'tamima/student': 'תמימה: כרטיס סטודנט', 'compliance/': 'תאימות ואבטחה', 'client/accessibility': 'אתר: הצהרת נגישות', 'client/privacy': 'אתר: מדיניות פרטיות', 'client/': 'אתר: בית', 'client/workshop': 'אתר: הזמנת סדנה', 'client/booking': 'אתר: ההזמנה שלי', 'client/course': 'אתר: קורס', 'tamima/home': 'תמימה: בית', 'tamima/calendar': 'תמימה: יומן', 'tamima/classes': 'תמימה: חוגים', 'tamima/workshops': 'תמימה: סדנאות', 'tamima/receipts': 'תמימה: קבלות', 'tamima/more': 'תמימה: עוד', 'student/home': 'סטודנט: בית', 'student/lessons': 'סטודנט: שיעורים', 'student/payments': 'סטודנט: תשלומים', 'student/makeup': 'סטודנט: השלמה', 'student/pay': 'סטודנט: תשלום' };
   function traceHtml() {
     const groups = [];
     trace.calls.forEach(c => {
@@ -96,6 +96,8 @@
     const [root, key] = b.split('.');
     const obj = bindRoot(root);
     if (obj) obj[key] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    // כפתור שמחכה לשדה (למשל "ביצוע זיכוי" עד שיש סכום)
+    document.querySelectorAll(`[data-needs="${b}"]`).forEach(x => { x.disabled = !String(e.target.value).trim(); });
     // חיפוש שמתעדכן בזמן ההקלדה, בלי לאבד את מיקום הסמן
     if (e.target.dataset.live === 'page') { const pos = e.target.selectionStart; render(); const el = document.querySelector(`[data-bind="${b}"]`); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch (err) { /* סוג שדה בלי סמן */ } } }
   });
@@ -103,7 +105,9 @@
   document.addEventListener('change', e => {
     if (e.target.matches('select[data-me]')) { ui.meId = e.target.value; render(); return; }
     const k = e.target.dataset.setting;
-    if (k) { const v = Number(e.target.value); if (v > 0) S.settings[k] = v; render(); }
+    if (k) { const v = Number(e.target.value); if (e.target.value !== '' && v >= 0) S.settings[k] = v; render(); }
+    const kt = e.target.dataset.settext;
+    if (kt) { S.settings[kt] = e.target.value.trim(); snack('נשמר.'); }
     const cs = e.target.dataset.chset;
     if (cs) {
       const [id, field] = cs.split('|');
@@ -187,7 +191,8 @@
   /* שיתוף מצב הדמו בין לשוניות: קישור אישי מהמייל נפתח בלשונית חדשה ומקבל את הנתונים מהלשונית של הדמו.
      תשלום שנעשה שם מופיע מיד אצל תמימה. האתר הציבורי (?p=site) עומד בפני עצמו ולא משתתף בשיתוף. */
   const chan = 'BroadcastChannel' in window ? new BroadcastChannel('tamima-demo') : null;
-  const shares = !PORTAL || PORTAL.kind !== 'site';
+  // האתר הציבורי עומד בפני עצמו. רק קישור אישי להזמנה ("ההזמנה שלי") מקבל את הנתונים מהלשונית של הדמו
+  const shares = !PORTAL || PORTAL.kind !== 'site' || !!PORTAL.b;
   let adopting = false, bcT = null, portalReady = !PORTAL || PORTAL.kind === 'studio';
   function shareState() {
     if (!chan || !shares || adopting || !portalReady) return;
@@ -214,7 +219,7 @@
   }
 
   reset();
-  if (PORTAL && PORTAL.kind === 'student') {
+  if (PORTAL && (PORTAL.kind === 'student' || PORTAL.b)) {
     ui.portalWait = true;
     if (chan) chan.postMessage({ t: 'need' });
     setTimeout(() => { if (!portalReady) { ui.portalWait = false; render(); } }, 1500);

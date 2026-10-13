@@ -91,6 +91,7 @@
     else if (r.page === 'course') body = courseView();
     else if (r.page === 'accessibility') body = accessibilityPage();
     else if (r.page === 'privacy') body = privacyPage();
+    else if (r.page === 'booking') body = myBookingView(r.param);
     else body = clientHome();
     return `<div class="site ${home ? 'is-home' : ''}">
       ${siteHeader(home)}
@@ -196,11 +197,11 @@
   function startHoldTimer() {
     if (holdTimer) return;
     holdTimer = setInterval(() => {
-      const h = holdOf(bk.hold);
+      const h = pendingOrder(bk.hold);
       if (bk.step !== 'pay' || route().page !== 'workshop') { clearInterval(holdTimer); holdTimer = null; if (bk.step === 'pay' && !h) A.bkExpire(); return; }
       if (!h) { clearInterval(holdTimer); holdTimer = null; A.bkExpire(); return; }
       const el = document.getElementById('hold-left');
-      if (el) el.textContent = mmss(h.until - now().getTime());
+      if (el) el.textContent = mmss(h.holdUntil - now().getTime());
     }, 1000);
   }
 
@@ -261,15 +262,15 @@
           <dt>מיקום</dt><dd>${esc(S.content.address)}</dd>
           <dt>סכום</dt><dd><b>${money(price(bk.n))}</b></dd>
         </dl>
-        <div class="policy">ביטול או שינוי מועד אפשריים עד ${S.settings.workshopCancelHours} שעות לפני הסדנה.</div>
+        <div class="policy">ביטול או שינוי מועד עד ${S.settings.workshopCancelHours} שעות לפני הסדנה. ביטול מאוחר יותר אינו כולל החזר.</div>
         ${err}
         <button class="btn primary block" data-act="bkToPay">לתשלום</button>
         <button class="btn ghost block" data-act="bkGo" data-s="details">חזרה</button>`);
     }
 
     if (bk.step === 'pay') {
-      const h = holdOf(bk.hold);
-      body = (h ? `<p class="hold-note">המועד שמור לכם עוד <b id="hold-left">${mmss(h.until - now().getTime())}</b> דקות</p>` : '') + sumitView(price(bk.n), `סדנת היכרות, ${bk.n} משתתפים, ${shortDay(bk.date)} ${bk.time}`, 'bkPay', 'bkPayBack');
+      const h = pendingOrder(bk.hold);
+      body = (h ? `<p class="hold-note">ההזמנה ממתינה לתשלום. המועד שמור לכם עוד <b id="hold-left">${mmss(h.holdUntil - now().getTime())}</b> דקות</p>` : '') + err + sumitView(price(bk.n), `סדנת היכרות, ${bk.n} משתתפים, ${shortDay(bk.date)} ${bk.time}`, 'bkPay', 'bkPayBack', 'bkPayFail');
       startHoldTimer();
     }
     if (bk.step === 'confirming') body = card(`<div class="confirming" role="status"><span class="spin" aria-hidden="true"></span><h2>מאשרים את התשלום</h2><p class="muted">רגע, ההזמנה נסגרת.</p></div>`);
@@ -287,9 +288,58 @@
           <dt>מיקום</dt><dd>${esc(S.content.address)}</dd>
         </dl>
         <button class="btn primary block" data-act="ics" data-id="${w.id}">הוספה ליומן</button>
+        <a class="btn ghost block" href="${PORTAL ? `?b=${w.k}#/client/booking` : `#/client/booking/${w.id}`}">ניהול ההזמנה</a>
         <button class="btn ghost block" data-act="bkRestart">חזרה לאתר</button>`, 'done');
     }
     return bookLayout(top + `<div class="step-body" data-step="${bk.step}">${body}</div>`);
+  }
+
+  /* ================= ההזמנה שלי: קישור אישי של לקוח מהמייל ================= */
+  function myBooking(param) {
+    if (PORTAL) return PORTAL.b ? S.workshops.find(w => w.k === PORTAL.b && !['pending', 'expired'].includes(w.status)) : null;
+    return workshop(param) || [...S.workshops].reverse().find(w => isOwn(w) && w.invoice);
+  }
+  const waLink = text => { const d = normPhone(S.settings.whatsapp); return `https://wa.me/${d.startsWith('0') ? '972' + d.slice(1) : d}?text=${encodeURIComponent(text)}`; };
+  function myBookingView(param) {
+    const w = myBooking(param);
+    if (!w) return `<h1 class="display">ההזמנה שלי</h1>${card(ui.portalWait ? '<p class="center">טוען את ההזמנה...</p>' : '<h2>הקישור לא זמין</h2><p>הקישור לא תקין, או שההזמנה לא נמצאה. אפשר לפנות לתמימה.</p>')}`;
+    if (!ui.cb || ui.cb.id !== w.id) ui.cb = { id: w.id, mode: '', date: null, time: null, msg: '' };
+    const f = ui.cb;
+    const H = S.settings.workshopCancelHours;
+    const hrs = hoursTo(w), early = hrs >= H;
+    const details = `<dl class="kv"><dt>תאריך</dt><dd>${longDay(w.date)}</dd><dt>שעה</dt><dd>${w.time} עד ${endOf(w.time)}</dd><dt>משתתפים</dt><dd>${w.n}</dd><dt>שולם</dt><dd>${money(w.amount)}</dd><dt>מיקום</dt><dd>${esc(S.content.address)}</dd></dl>
+      ${w.invoice ? `<div class="pay-row"><span>חשבונית מס קבלה מס׳ ${w.invoice}</span>${pdfBtn(w.invoice, 'פתיחת החשבונית')}${refundLines(w.invoice)}</div>` : ''}`;
+    const msg = f.msg ? `<p class="ok-line" role="status">${esc(f.msg)}</p>` : '';
+    let act = '';
+    if (w.status === 'cancelled') act = `<p>${openRefundCases().some(x => x.wsId === w.id) ? 'הביטול התקבל. תמימה תעדכן אותך לגבי ההחזר.' : 'ההזמנה בוטלה.'}</p>`;
+    else if (hrs <= 0) act = '<p>הסדנה כבר התקיימה. תודה שהגעתם!</p>';
+    else if (f.mode === 'move' && early) {
+      const days = [];
+      for (let i = 0; i <= G.channels.get(HOME).horizonDays; i++) {
+        const d = iso(addDays(startOfToday(), i));
+        const sl = freeSlots(d).filter(t => at(d, t) - now() >= H * 36e5);
+        if (sl.length) days.push({ date: d, slots: sl });
+      }
+      if (!f.date || !days.some(x => x.date === f.date)) { f.date = days.length ? days[0].date : null; f.time = null; }
+      const cur = days.find(x => x.date === f.date);
+      act = `<h2>הזזה למועד אחר</h2>${dayPlan(days.map(x => x.date), f.date, 'cbDate')}
+        ${cur ? `<h3>שעה, ${longDay(cur.date)}</h3><div class="slots">${cur.slots.map(t => `<button class="slot ${t === f.time ? 'on' : ''}" data-act="cbTime" data-t="${t}">${t} עד ${endOf(t)}</button>`).join('')}</div>` : empty('אין כרגע מועדים פנויים.')}
+        <button class="btn primary block" data-act="cbMoveDo" ${f.time ? '' : 'disabled'}>הזזה למועד הזה</button><button class="btn ghost block" data-act="cbMode" data-m="">חזרה</button>`;
+    } else if (f.mode === 'cancel' && early) {
+      act = `<h2>לבטל את ההזמנה?</h2><p>המועד יתפנה, ותמימה תעדכן אותך לגבי ההחזר.</p>
+        <button class="btn danger block" data-act="cbCancelDo">ביטול ההזמנה</button><button class="btn ghost block" data-act="cbMode" data-m="">השארת ההזמנה</button>`;
+    } else if (f.mode === 'late' && !early) {
+      const text = `היי תמימה, אני ${w.customer.name}, הזמנתי סדנה ב-${dmy(w.date)}.${parse(w.date).getFullYear()} בשעה ${w.time} ורוצה לבדוק אפשרות ביטול.`;
+      act = `<div class="policy warn">ביטול בפחות מ-${H} שעות אינו כולל החזר. לבירור אפשרויות, דברו עם תמימה.</div>
+        <a class="btn primary block" href="${esc(waLink(text))}" target="_blank" rel="noopener">שליחת הודעה לתמימה בוואטסאפ</a>
+        <p class="muted small">ההזמנה נשארת בתוקף עד שתמימה תחליט.</p><button class="btn ghost block" data-act="cbMode" data-m="">חזרה</button>`;
+    } else if (early) {
+      act = `<p class="muted small">ביטול או שינוי מועד עד ${H} שעות לפני הסדנה. ביטול מאוחר יותר אינו כולל החזר.</p>
+        <button class="btn primary block" data-act="cbMode" data-m="move">הזזה למועד אחר</button><button class="btn ghost block" data-act="cbMode" data-m="cancel">ביטול ההזמנה</button>`;
+    } else {
+      act = `<p class="muted small">שינוי מועד אפשרי עד ${H} שעות לפני הסדנה.</p><button class="btn ghost block" data-act="cbMode" data-m="late">ביטול</button>`;
+    }
+    return `<h1 class="display">ההזמנה שלי</h1>${card(`<h2>סדנת קרמיקה${w.status === 'cancelled' ? ' · בוטלה' : ''}</h2>${details}`)}${card(msg + act)}`;
   }
 
   function courseView() {
@@ -334,39 +384,73 @@
       if (bk.errField) ui.focusSel = `[data-bind="bk.${bk.errField}"]`;
       render(); if (!bk.errField) scrollTop();
     },
+    // "לתשלום": נוצרת הזמנה בסטטוס "ממתין לתשלום", ונוצר דף תשלום בסאמיט
     bkToPay() {
       if (!freeSlots(bk.date, bk.hold).includes(bk.time)) { releaseHold(bk.hold); bk.hold = null; bk.step = 'slot'; bk.time = null; bk.err = 'המועד שבחרתם נתפס בינתיים. בחרו מועד אחר.'; }
-      else { bk.hold = holdSlot(bk.date, bk.time, bk.hold).id; bk.err = ''; bk.step = 'pay'; }
+      else {
+        const w = createOrder({ date: bk.date, time: bk.time, n: bk.n, customer: { name: bk.name.trim(), phone: bk.phone.trim(), email: bk.email.trim() } }, bk.hold);
+        bk.hold = w.id; bk.err = ''; bk.step = 'pay';
+      }
       render(); scrollTop();
     },
-    bkPayBack() { bk.step = 'summary'; render(); },
-    // עברו 5 דקות בלי תשלום: המועד משתחרר והלקוח חוזר לבחירת מועד
+    bkPayBack() { bk.err = ''; bk.step = 'summary'; render(); },
+    // עברו 5 דקות בלי תשלום: ההזמנה פגה, המועד משתחרר, והלקוח חוזר לבחירת מועד
     bkExpire() {
-      const h = (S.holds || []).find(x => x.id === bk.hold);
-      if (h) log('sync', `${shortDay(h.date)} ${h.time} שוחרר`, `עברו ${HOLD_MIN} דקות בלי תשלום, והמועד חזר להיות פנוי.`);
-      releaseHold(bk.hold); bk.hold = null;
+      expireOrder(bk.hold); bk.hold = null;
       bk.step = 'slot'; bk.time = null; bk.err = `עברו ${HOLD_MIN} דקות, והמועד שוחרר. אפשר לבחור מועד שוב.`;
       render(); scrollTop();
     },
+    // תשלום שנכשל או בוטל בדף של סאמיט: ההזמנה נשארת "ממתין לתשלום", ואפשר לנסות שוב
+    bkPayFail() {
+      const w = pendingOrder(bk.hold);
+      if (!w) return A.bkExpire();
+      sumitCustomerFailed({ desc: wsDesc(w) });
+      bk.err = 'התשלום לא עבר. ההזמנה עדיין שמורה, ואפשר לנסות שוב.';
+      render();
+    },
     bkPay() {
-      if (!holdOf(bk.hold)) return A.bkExpire();
-      const amount = price(bk.n), inv = S.nextInvoice++;
-      const customer = { name: bk.name.trim(), phone: bk.phone.trim(), email: bk.email.trim() };
-      const order = { holdId: bk.hold, date: bk.date, time: bk.time, n: bk.n, amount, invoice: inv, customer };
-      // שלב 1: סאמיט מחייב את הכרטיס ומפיק קבלה
-      log('sumit', `סאמיט: התקבל תשלום ${money(amount)}`, `חשבונית מס קבלה מס׳ ${inv} הופקה ונשלחה למערכת.`);
-      bk.step = 'confirming'; render(); scrollTop();
-      // שלב 2: סאמיט שולח למערכת אישור תשלום והקבלה. המערכת סוגרת את המועד, שומרת את הקבלה בכרטיס הלקוח ושולחת ללקוח מייל אחד
+      const w0 = pendingOrder(bk.hold);
+      if (!w0) return A.bkExpire();
+      // הלקוח משלם בדף של סאמיט. סאמיט מפיק חשבונית מס קבלה, שומר טוקן ושולח הודעת שרת (IPN)
+      const paymentId = sumitCustomerPaid({ id: w0.id, amount: w0.amount });
+      bk.err = ''; bk.step = 'confirming'; render(); scrollTop();
+      // "שולם" רק אחרי הודעת השרת ואימות התשלום, לא מדף התודה
       setTimeout(() => {
-        const w = sumitPaid(order);
+        const w = sumitIpn(paymentId);
+        if (!w) { bk.step = 'pay'; bk.err = 'לא הצלחנו לאמת את התשלום. אפשר לנסות שוב.'; render(); return; }
         bk.hold = null;
-        email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, `חשבונית מס קבלה מס׳ ${inv} מצורפת.`, `אפשר לבטל או לשנות מועד עד ${S.settings.workshopCancelHours} שעות לפני.`, 'נתראה, תמימה'], { extra: receiptMailHtml(inv, w.customer.name, `סדנת קרמיקה, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}`, w.amount, w.paidAt) });
+        email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, `חשבונית מס קבלה מס׳ ${w.invoice} מצורפת.`, `ביטול או שינוי מועד עד ${S.settings.workshopCancelHours} שעות לפני הסדנה, בקישור למטה. ביטול מאוחר יותר אינו כולל החזר.`, 'נתראה, תמימה'], { extra: receiptMailHtml(w.invoice, w.customer.name, wsDesc(w), w.amount, w.paidAt), cta: ['לניהול ההזמנה', bookingUrl(w)] });
         email('newBooking', toStudio(), `הזמנה חדשה: ${w.customer.name}, ${shortDay(w.date)} ${w.time}`, [`${w.customer.name} הזמין/ה סדנה מהאתר.`, `${longDay(w.date)}, ${w.time} · ${w.n} משתתפים · ${money(w.amount)}.`, `טלפון: ${w.customer.phone}`], { cta: ['לסדנאות', siteUrl('#/tamima/workshops')] });
         log('notify', 'הזמנה חדשה נכנסה לדשבורד', `סדנה מהאתר, ${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}.`);
         bk.done = w.id; bk.step = 'done';
         render(); scrollTop();
         toast('הזמנה חדשה מהאתר', `${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}`);
       }, 1200);
+    },
+    // ההזמנה שלי
+    cbMode(d) { ui.cb.mode = d.m; ui.cb.msg = ''; ui.cb.date = null; ui.cb.time = null; render(); },
+    cbDate(d) { ui.cb.date = d.date; ui.cb.time = null; render(); },
+    cbTime(d) { ui.cb.time = d.t; render(); },
+    // הזזה בזמן: לא נפתח זיכוי, החשבונית נשארת, וההזזה החד פעמית לא מסומנת
+    cbMoveDo() {
+      const w = workshop(ui.cb.id), f = ui.cb;
+      if (!w || hoursTo(w) < S.settings.workshopCancelHours || !freeSlots(f.date).includes(f.time)) { f.msg = 'המועד כבר לא פנוי. אפשר לבחור מועד אחר.'; render(); return; }
+      const from = shiftWorkshop(w, f.date, f.time);
+      log('notify', `${w.customer.name} הזיז/ה את הסדנה`, `מ${from} ל${shortDay(w.date)} ${w.time}. החשבונית נשארת, ולא נפתח זיכוי.`);
+      toast('לקוח הזיז סדנה', `${w.customer.name}: ${shortDay(w.date)} ${w.time}`);
+      Object.assign(f, { mode: '', date: null, time: null, msg: `המועד עודכן ל${longDay(w.date)}, ${w.time}. אישור נשלח למייל.` });
+      render();
+    },
+    // ביטול בזמן: ההזמנה מתבטלת, ונפתח אצל תמימה "זיכוי ממתין להחלטה" עם החזר מלא מוצע. שום החזר לא יוצא לבד
+    cbCancelDo() {
+      const w = workshop(ui.cb.id);
+      if (!w || hoursTo(w) < S.settings.workshopCancelHours) return;
+      dropWorkshop(w);
+      if (w.invoice) openRefundCase({ inv: w.invoice, reason: 'customer', wsId: w.id, suggested: w.amount - refundedOf(w.invoice), why: `הלקוח ביטל יותר מ-${S.settings.workshopCancelHours} שעות לפני הסדנה: מוצע החזר מלא.` });
+      email('customerCancel', toStudio(), `${w.customer.name} ביטל/ה סדנה`, ['שלום תמימה,', `${w.customer.name} ביטל/ה את הסדנה ב${longDay(w.date)}, ${w.time}.`, 'המועד התפנה. הזיכוי ממתין להחלטה שלך.'], { cta: ['להחלטה', siteUrl('#/tamima/home')] });
+      toast('לקוח ביטל סדנה', `${w.customer.name}, ${shortDay(w.date)} ${w.time}. הזיכוי ממתין להחלטה.`);
+      Object.assign(ui.cb, { mode: '', msg: 'הביטול התקבל. תמימה תעדכן אותך לגבי ההחזר.' });
+      render();
     },
     bkRestart() { A.startBooking(); location.hash = '#/client'; },
     ics(d) {
