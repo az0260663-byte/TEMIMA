@@ -13,7 +13,7 @@
             <p class="muted small">בדמו: הקישור האישי עובד כשהדמו פתוח באותו דפדפן, בלשונית אחרת.</p>`)}
       </main></div>`;
     if (!s) return `<div class="appshell student">
-      ${appHead('plate-apron', 'אפליקציית הסטודנט', 'כאן כל סטודנט רואה את השיעורים, הכרטיסייה והתשלומים שלו')}
+      ${appHead('plate-apron', 'אפליקציית הסטודנט', 'כאן מוצגים השיעורים, הכרטיסייה והתשלומים של כל סטודנט')}
       <main id="main" tabindex="-1" class="wrap"><h1 class="sr-only">אפליקציית הסטודנט</h1>
         ${card(`<h2>עדיין אין סטודנטים</h2>
           <p>ברגע שנוסף סטודנט, האפליקציה שלו מופיעה כאן.</p>
@@ -195,7 +195,7 @@
             html += ci.late
               ? `<div class="policy warn"><b>ביטול מאוחר</b>השיעור מתחיל בעוד פחות מ-24 שעות. הביטול ייחשב כשיעור שנוצל מהכרטיסייה, ולא תהיה השלמה.</div>`
               : ci.credit
-                ? `<div class="policy"><b>ביטול בזמן</b>תקבלי השלמה שאפשר לקבוע בקבוצה אחרת שיש בה מקום, עד ${dmy(iso(addMonths(startOfToday(), 1)))}.</div>`
+                ? `<div class="policy"><b>ביטול בזמן</b>תהיה לך השלמה שאפשר לקבוע בקבוצה אחרת שיש בה מקום, עד ${dmy(iso(addMonths(startOfToday(), 1)))}.</div>`
                 : `<div class="policy warn"><b>ביטול בזמן, ללא השלמה</b>כבר קיבלת השלמה החודש. אפשר לבטל, אבל הביטול הזה לא מזכה בהשלמה נוספת.</div>`;
             html += `<button class="btn ${ci.late ? 'danger' : 'primary'} block" data-act="stuCancel" data-l="${l.id}">אישור ביטול</button><button class="btn ghost block" data-act="closeSheet">השארת השיעור</button>`;
           }
@@ -248,7 +248,7 @@
       const s = me();
       if (!(ui.pol && ui.pol.ok)) return;
       s.policy = { date: todayIso(), version: S.settings.policyVersion };
-      log('notify', `${s.name} אישר/ה את המדיניות`, `גרסה ${s.policy.version}, ${fullDate(s.policy.date)}.`);
+      log('notify', `${s.name}: המדיניות אושרה`, `גרסה ${s.policy.version}, ${fullDate(s.policy.date)}.`);
       ui.stuMsg = 'המדיניות אושרה. תודה!'; location.hash = '#/student/payments'; flashClear();
     },
     sigClear() { if (ui.lv) ui.lv.sig = ''; render(); },
@@ -261,7 +261,7 @@
       const e = leaveEndDate(s);
       s.leave = { noticeDate: todayIso(), endDate: e.date, minDate: e.date, name: f.name.trim(), sig: f.sig, version: S.settings.policyVersion, source: 'app', seen: false };
       leaveMailStudent(s);
-      email('leaveAlert', toStudio(), `הודעת עזיבה: ${s.name}`, ['שלום תמימה,', `${s.name} שלח/ה הודעת עזיבה מהאפליקציה, עם חתימה.`, `תאריך הסיום: ${longDay(s.leave.endDate)}.`], { cta: ['לכרטיס הסטודנט', siteUrl(`#/tamima/student/${s.id}`)] });
+      email('leaveAlert', toStudio(), `הודעת עזיבה: ${s.name}`, ['שלום תמימה,', `${s.name}: הודעת עזיבה נשלחה מהאפליקציה, עם חתימה.`, `תאריך הסיום: ${longDay(s.leave.endDate)}.`], { cta: ['לכרטיס הסטודנט', siteUrl(`#/tamima/student/${s.id}`)] });
       log('notify', `הודעת עזיבה: ${s.name}`, `תאריך הסיום ${fullDate(s.leave.endDate)}. נשמרו התאריך, השם, החתימה וגרסת המדיניות.`);
       toast('הודעת עזיבה', `${s.name}, סיום ב${longDay(s.leave.endDate)}`);
       ui.lv = null; ui.stuMsg = `הודעת העזיבה נשלחה. תאריך הסיום: ${longDay(s.leave.endDate)}.`; render(); flashClear();

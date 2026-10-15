@@ -420,7 +420,7 @@
         if (!w) { bk.step = 'pay'; bk.err = 'לא הצלחנו לאמת את התשלום. אפשר לנסות שוב.'; render(); return; }
         bk.hold = null;
         email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, `חשבונית מס קבלה מס׳ ${w.invoice} מצורפת.`, `ביטול או שינוי מועד עד ${S.settings.workshopCancelHours} שעות לפני הסדנה, בקישור למטה. ביטול מאוחר יותר אינו כולל החזר.`, 'נתראה, תמימה'], { extra: receiptMailHtml(w.invoice, w.customer.name, wsDesc(w), w.amount, w.paidAt), cta: ['לניהול ההזמנה', bookingUrl(w)] });
-        email('newBooking', toStudio(), `הזמנה חדשה: ${w.customer.name}, ${shortDay(w.date)} ${w.time}`, [`${w.customer.name} הזמין/ה סדנה מהאתר.`, `${longDay(w.date)}, ${w.time} · ${w.n} משתתפים · ${money(w.amount)}.`, `טלפון: ${w.customer.phone}`], { cta: ['לסדנאות', siteUrl('#/tamima/workshops')] });
+        email('newBooking', toStudio(), `הזמנה חדשה: ${w.customer.name}, ${shortDay(w.date)} ${w.time}`, [`${w.customer.name}: הזמנת סדנה מהאתר.`, `${longDay(w.date)}, ${w.time} · ${w.n} משתתפים · ${money(w.amount)}.`, `טלפון: ${w.customer.phone}`], { cta: ['לסדנאות', siteUrl('#/tamima/workshops')] });
         log('notify', 'הזמנה חדשה נכנסה לדשבורד', `סדנה מהאתר, ${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}.`);
         bk.done = w.id; bk.step = 'done';
         render(); scrollTop();
@@ -436,8 +436,8 @@
       const w = workshop(ui.cb.id), f = ui.cb;
       if (!w || hoursTo(w) < S.settings.workshopCancelHours || !freeSlots(f.date).includes(f.time)) { f.msg = 'המועד כבר לא פנוי. אפשר לבחור מועד אחר.'; render(); return; }
       const from = shiftWorkshop(w, f.date, f.time);
-      log('notify', `${w.customer.name} הזיז/ה את הסדנה`, `מ${from} ל${shortDay(w.date)} ${w.time}. החשבונית נשארת, ולא נפתח זיכוי.`);
-      toast('לקוח הזיז סדנה', `${w.customer.name}: ${shortDay(w.date)} ${w.time}`);
+      log('notify', `${w.customer.name}: הסדנה הוזזה מ"ההזמנה שלי"`, `מ${from} ל${shortDay(w.date)} ${w.time}. החשבונית נשארת, ולא נפתח זיכוי.`);
+      toast('סדנה הוזזה מ"ההזמנה שלי"', `${w.customer.name}: ${shortDay(w.date)} ${w.time}`);
       Object.assign(f, { mode: '', date: null, time: null, msg: `המועד עודכן ל${longDay(w.date)}, ${w.time}. אישור נשלח למייל.` });
       render();
     },
@@ -446,9 +446,9 @@
       const w = workshop(ui.cb.id);
       if (!w || hoursTo(w) < S.settings.workshopCancelHours) return;
       dropWorkshop(w);
-      if (w.invoice) openRefundCase({ inv: w.invoice, reason: 'customer', wsId: w.id, suggested: w.amount - refundedOf(w.invoice), why: `הלקוח ביטל יותר מ-${S.settings.workshopCancelHours} שעות לפני הסדנה: מוצע החזר מלא.` });
-      email('customerCancel', toStudio(), `${w.customer.name} ביטל/ה סדנה`, ['שלום תמימה,', `${w.customer.name} ביטל/ה את הסדנה ב${longDay(w.date)}, ${w.time}.`, 'המועד התפנה. הזיכוי ממתין להחלטה שלך.'], { cta: ['להחלטה', siteUrl('#/tamima/home')] });
-      toast('לקוח ביטל סדנה', `${w.customer.name}, ${shortDay(w.date)} ${w.time}. הזיכוי ממתין להחלטה.`);
+      if (w.invoice) openRefundCase({ inv: w.invoice, reason: 'customer', wsId: w.id, suggested: w.amount - refundedOf(w.invoice), why: `ביטול יותר מ-${S.settings.workshopCancelHours} שעות לפני הסדנה: מוצע החזר מלא.` });
+      email('customerCancel', toStudio(), `ביטול סדנה: ${w.customer.name}`, ['שלום תמימה,', `הסדנה של ${w.customer.name} ב${longDay(w.date)}, ${w.time} בוטלה מ"ההזמנה שלי".`, 'המועד התפנה. הזיכוי ממתין להחלטה שלך.'], { cta: ['להחלטה', siteUrl('#/tamima/home')] });
+      toast('ביטול סדנה מ"ההזמנה שלי"', `${w.customer.name}, ${shortDay(w.date)} ${w.time}. הזיכוי ממתין להחלטה.`);
       Object.assign(ui.cb, { mode: '', msg: 'הביטול התקבל. תמימה תעדכן אותך לגבי ההחזר.' });
       render();
     },
@@ -474,7 +474,7 @@
       else {
         lead.err = ''; lead.sent = true;
         S.leads.push({ id: uid('ld'), name: lead.name.trim(), phone: lead.phone.trim(), email: lead.email.trim(), group: lead.group, handled: false, status: 'new', at: todayIso() });
-        email('newLead', toStudio(), `פנייה חדשה לקורס: ${lead.name.trim()}`, [`${lead.name.trim()} השאיר/ה פרטים באתר.`, `טלפון: ${lead.phone.trim()}`, `מייל: ${lead.email.trim()}`, lead.group ? `קבוצה מועדפת: ${group(lead.group).name}.` : 'כל קבוצה מתאימה.'], { cta: ['לבית', siteUrl('#/tamima/home')] });
+        email('newLead', toStudio(), `פנייה חדשה לקורס: ${lead.name.trim()}`, [`${lead.name.trim()}: פרטים הושארו באתר.`, `טלפון: ${lead.phone.trim()}`, `מייל: ${lead.email.trim()}`, lead.group ? `קבוצה מועדפת: ${group(lead.group).name}.` : 'כל קבוצה מתאימה.'], { cta: ['לבית', siteUrl('#/tamima/home')] });
         toast('פנייה חדשה לקורס', `${lead.name.trim()}, ${lead.phone.trim()}`);
       }
       if (lead.errField) ui.focusSel = `[data-bind="lead.${lead.errField}"]`;

@@ -14,7 +14,7 @@
     const cu = w && customerOf(w);
     const title = f.late ? 'פנייה מאוחרת מהלקוח' : f.reason && f.reason !== 'manual' ? `זיכוי ממתין להחלטה · ${REFUND_REASON[f.reason]}` : `זיכוי לחשבונית מס׳ ${f.inv}`;
     const late = f.late && w && w.status !== 'cancelled' ? `<div class="policy"><b>הזזה למועד אחר (חד פעמי)</b>במקום ביטול: הסדנה עוברת למועד אחר, והחשבונית נשארת.</div>
-        ${cu && cu.lateMoveUsed ? `<p class="policy warn">הלקוח כבר קיבל הזזה חד פעמית ב-${dmy(cu.lateMoveUsed)}.${parse(cu.lateMoveUsed).getFullYear()}.</p>` : ''}
+        ${cu && cu.lateMoveUsed ? `<p class="policy warn">כבר ניתנה הזזה חד פעמית ב-${dmy(cu.lateMoveUsed)}.${parse(cu.lateMoveUsed).getFullYear()}.</p>` : ''}
         <button class="btn primary block" data-act="lateMove">הזזה למועד אחר (חד פעמי)</button><h3>או ביטול</h3>` : '';
     return `<h2>${title}</h2>
       <p class="muted">${esc(info.name)} · ${esc(info.desc)}</p>
@@ -883,10 +883,10 @@
     const stChip = l => {
       if (l.cancelled) return chip('בוטל על ידי הסטודיו', 'muted');
       const v = att(l.id).rec[s.id];
-      if (v === 'arrived') return chip('הגיע', 'paid');
-      if (v === 'cancelled') return chip('ביטל בזמן', 'requested');
+      if (v === 'arrived') return chip('הגעה', 'paid');
+      if (v === 'cancelled') return chip('ביטול בזמן', 'requested');
       if (v === 'late') return chip('ביטול מאוחר', 'overdue');
-      if (v === 'absent') return chip('לא הגיע', 'overdue');
+      if (v === 'absent') return chip('אי הגעה', 'overdue');
       return lStart(l) > now() ? chip('מתוכנן', 'ok') : chip('לא סומן', 'muted');
     };
     const upcoming = studentUpcoming(s).slice(0, 4);
@@ -902,7 +902,7 @@
           <h1>${esc(s.name)}</h1>
           <p class="muted">${g ? `${esc(g.name)} · יום ${DAYS[g.day]} ${g.start}` : ''}${s.start ? ` · ${s.start > todayIso() ? `מתחיל ב${longDay(s.start)}` : `תחילת הקורס ${dmy(s.start)}`}` : ''}</p>
           <p class="stu-contact"><span dir="ltr">${esc(s.phone)}</span>${s.email ? ` · <span dir="ltr">${esc(s.email)}</span>` : ' · <span class="muted">אין מייל</span>'}</p>
-          <div class="srow-meta">${off ? chip('לא פעיל', 'muted') : chip(ps.label, ps.key)}${credits.some(m => !m.bookedLessonId) ? chip('השלמה פתוחה', 'site') : ''}${s.policy ? chip(`מדיניות אושרה ב-${fullDate(s.policy.date)}`, 'paid') : chip('מדיניות לא אושרה', 'requested')}${s.leave && !off ? chip(`מסיים ב-${fullDate(s.leave.endDate)}`, 'requested') : ''}</div>
+          <div class="srow-meta">${off ? chip('לא בקורס', 'muted') : chip(ps.label, ps.key)}${credits.some(m => !m.bookedLessonId) ? chip('השלמה פתוחה', 'site') : ''}${s.policy ? chip(`מדיניות אושרה ב-${fullDate(s.policy.date)}`, 'paid') : chip('מדיניות לא אושרה', 'requested')}${s.leave && !off ? chip(`סיום ב-${fullDate(s.leave.endDate)}`, 'requested') : ''}</div>
           ${s.policy ? '' : `<button class="btn ghost small" data-act="stuPolicyLink" data-id="${s.id}">שליחת קישור לאישור המדיניות</button>`}
         </div>
         <div class="btn-row"><button class="btn primary small" data-act="stuEdit" data-id="${s.id}">עריכת פרטים</button>${off
@@ -916,7 +916,7 @@
           <p class="muted small center">תיקון ידני, למשל שיעור שלא סומן.</p>
           ${needs ? `<button class="btn primary block" data-act="remind" data-id="${s.id}">${s.reminded ? 'לשלוח שוב תזכורת' : 'שליחת תזכורת לתשלום'}</button>` : ''}
           <button class="btn ghost block" data-act="stuPayManual" data-id="${s.id}">רישום תשלום שהתקבל</button>
-          ${needs && ui.guided ? `<button class="btn demo block" data-act="simPay" data-id="${s.id}">הדגמה: הסטודנט שילם בקישור</button>` : ''}`)}
+          ${needs && ui.guided ? `<button class="btn demo block" data-act="simPay" data-id="${s.id}">הדגמה: תשלום בקישור</button>` : ''}`)}
         ${card(`<h2>פרטי קשר</h2>
           <dl class="kv"><dt>טלפון</dt><dd dir="ltr"><a href="tel:${esc(s.phone.replace(/[^\d+]/g, ''))}">${esc(s.phone)}</a></dd>
           <dt>מייל</dt><dd dir="ltr">${s.email ? `<a href="mailto:${esc(s.email)}">${esc(s.email)}</a>` : 'לא נמסר'}</dd></dl>
@@ -937,10 +937,10 @@
   // [שם, צבע, הסבר]
   const LEAD_STATUS = {
     new: ['חדשה', 'site', ''],
-    waiting: ['ממתין למקום', 'requested', 'רוצה להצטרף, אבל אין עכשיו מקום בקבוצה שמתאימה לו'],
+    waiting: ['ממתין למקום', 'requested', 'יש רצון להצטרף, אבל אין עכשיו מקום בקבוצה המתאימה'],
     noanswer: ['לא ענה', 'muted', 'ניסיתי ליצור קשר ולא הצלחתי'],
-    notfit: ['דיברנו, לא מתאים', 'muted', 'הקורס לא מתאים לו כרגע'],
-    student: ['נרשם לקורס', 'paid', '']
+    notfit: ['דיברנו, לא מתאים', 'muted', 'הקורס לא מתאים כרגע'],
+    student: ['הצטרפות לקורס', 'paid', '']
   };
   const leadStatus = l => l.status || (l.handled ? 'notfit' : 'new');
   const hasSeat = gid => { const g = group(gid); return g && g.active !== false && groupStudents(gid).length < g.max; };
@@ -971,7 +971,7 @@
     const row = s => {
       const ps = payStatus(s);
       return `<a class="st-row" href="#/tamima/student/${s.id}"><span class="avatar sm" aria-hidden="true">${esc(s.name.trim()[0] || '?')}</span>
-        <span class="st-txt"><b>${esc(s.name)}</b><small>כרטיסייה ${s.used}/${S.settings.cardSize} · <span dir="ltr">${esc(s.phone)}</span></small></span>${s.active === false ? chip('לא פעיל', 'muted') : chip(ps.label, ps.key)}</a>`;
+        <span class="st-txt"><b>${esc(s.name)}</b><small>כרטיסייה ${s.used}/${S.settings.cardSize} · <span dir="ltr">${esc(s.phone)}</span></small></span>${s.active === false ? chip('לא בקורס', 'muted') : chip(ps.label, ps.key)}</a>`;
     };
     const sections = activeGroups().map(g => {
       const list = groupStudents(g.id).filter(match);
@@ -997,7 +997,7 @@
   /* ---------- טפסים בחלון ---------- */
   function studentFormHtml() {
     const f = ui.stf;
-    return `<h2>${f.id ? 'עריכת פרטי סטודנט' : 'סטודנט חדש'}</h2>
+    return `<h2>${f.id ? 'עריכת פרטי סטודנט' : 'הוספה לקורס'}</h2>
       ${fld('stf', 'name', 'שם מלא', 'autocomplete="off" required aria-required="true"')}
       ${fld('stf', 'phone', 'טלפון', 'type="tel" inputmode="tel" required aria-required="true"')}
       ${fld('stf', 'email', 'מייל <small class="hint-inline">לאישורים, חשבוניות ותזכורות</small>', 'type="email" inputmode="email" autocomplete="off" placeholder="name@example.com"')}
@@ -1013,8 +1013,8 @@
         return dates.length ? pickSel('stf', 'start', 'תחילת הקורס', dates.map(d => [d, d < todayIso() ? `${longDay(d)} (כבר התחיל)` : longDay(d)]))
           : '<p class="notice">אין לקבוצה הזו שיעורים קרובים. אפשר לבחור קבוצה אחרת.</p>';
       })()}
-      <p class="muted small">מהתאריך הזה הסטודנט מופיע ברשימת הנוכחות, והכרטיסייה מתחילה להיספר.</p>
-      ${f.id && student(f.id).groupId !== f.groupId ? '<p class="notice">המעבר חל מהשיעור הבא. הסטודנט יקבל הודעה.</p>' : ''}
+      <p class="muted small">מהתאריך הזה השם מופיע ברשימת הנוכחות, והכרטיסייה מתחילה להיספר.</p>
+      ${f.id && student(f.id).groupId !== f.groupId ? '<p class="notice">המעבר חל מהשיעור הבא, ותישלח הודעה במייל.</p>' : ''}
       ${errP('stf')}
       <button class="btn primary block" data-act="stuSave">שמירה</button>`;
   }
@@ -1059,7 +1059,7 @@
     return `<h2>הזזה למועד אחר</h2><p class="muted">עכשיו: ${longDay(f.fromDate)}, ${f.fromTime}</p>
       ${pickSel('mvf', 'date', 'יום', dayOptions(60).filter(([d]) => f.kind === 'ws' || !releaseProblem(f.ch, d, '23:59')), true)}
       ${opts.length ? pickSel('mvf', 'time', 'שעה', opts.map(o => [o.t, o.label])) : '<p class="policy warn" role="status">אין ביום הזה שעתיים פנויות.</p>'}
-      ${f.kind === 'ws' ? '<p class="notice">הלקוח יקבל מייל עם המועד החדש.</p>' : ''}
+      ${f.kind === 'ws' ? '<p class="notice">יישלח מייל עם המועד החדש.</p>' : ''}
       ${errP('mvf')}
       <button class="btn primary block" data-act="mvSave" ${f.time ? '' : 'disabled'}>הזזה</button>`;
   }
@@ -1131,7 +1131,7 @@
     'client/course': ['ליד הטופס מוסבר למה צריך את הפרטים.', 'הסכמה לעדכונים במייל היא בחירה, ולא מסומנת מראש.'],
     'client/accessibility': ['העמוד מסביר ללקוח מה אפשר לעשות באתר, ואיך לבקש התאמה או לדווח על בעיה.'],
     'client/privacy': ['העמוד מסביר ללקוח, בקצרה, מה נאסף, למה, ומי רואה.'],
-    'student/home': ['כל סטודנט רואה רק את השיעורים והתשלומים שלו.'],
+    'student/home': ['באזור האישי מוצגים רק השיעורים והתשלומים של בעל/ת הקישור.'],
     'student/payments': ['התשלום בעמוד המאובטח של סאמיט. פרטי האשראי לא מגיעים לסטודיו.']
   };
   function complNotes(r) {
@@ -1233,7 +1233,7 @@
     const rs = roster(sel);
     const done = rs.regs.filter(s => a.rec[s.id]).length;
 
-    const opts = [['arrived', 'הגיע'], ['cancelled', 'ביטל בזמן'], ['late', 'ביטול מאוחר']];
+    const opts = [['arrived', 'הגיע'], ['cancelled', 'ביטול בזמן'], ['late', 'ביטול מאוחר']];
     const rows = rs.regs.map(s => {
       const ps = payStatus(s);
       const cr = openCredits(s).length;
@@ -1446,7 +1446,7 @@
         <dt>השלמות פתוחות</dt><dd>${cr.length ? cr.map(m => 'עד ' + dmy(m.expires)).join(', ') : 'אין'}</dd>
       </dl>
       ${needs ? `<button class="btn ${s.reminded ? 'ghost' : 'primary'} block" data-act="remind" data-id="${s.id}">${s.reminded ? 'תזכורת נשלחה, לשלוח שוב' : 'שליחת תזכורת לתשלום'}</button>` : ''}
-      ${needs && ui.guided ? `<button class="btn demo block" data-act="simPay" data-id="${s.id}">הדגמה: הסטודנט שילם בקישור</button>` : ''}
+      ${needs && ui.guided ? `<button class="btn demo block" data-act="simPay" data-id="${s.id}">הדגמה: תשלום בקישור</button>` : ''}
       <h3>תשלומים אחרונים</h3>
       ${hist.map(p => `<div class="ws-row"><span class="dot dot-paid"></span><div><b>${money(p.amount)}</b><small>${dmy(p.date)} · חשבונית מס קבלה מס׳ ${p.invoice}</small></div></div>`).join('')}`;
   }
@@ -1642,7 +1642,7 @@
       const name = (ui.chf.name || '').trim();
       if (!name) { ui.chf.err = 'נא לתת שם לערוץ.'; render(); return; }
       const ch = G.channels.addChannel(name);
-      log('sync', `ערוץ חדש: "${ch.name}"`, 'נוצר יומן גוגל חדש לערוץ. משבצות שתשייכי אליו ייכתבו רק ליומן הזה.');
+      log('sync', `ערוץ חדש: "${ch.name}"`, 'נוצר יומן גוגל חדש לערוץ. משבצות שישויכו אליו ייכתבו רק ליומן הזה.');
       ui.chf = { name: '', err: '' };
       render();
     },
@@ -1813,7 +1813,7 @@
       if (err) { f.err = err; f.errField = field; renderSheet(); const el = $(`[data-bind="stf.${field}"]`); if (el) el.focus(); return; }
       if (f.leadId) { const l = S.leads.find(x => x.id === f.leadId); if (l) Object.assign(l, { handled: true, status: 'student', handledAt: todayIso(), studentId: id }); }
       closeSheet();
-      snack(isNew ? 'הסטודנט נוסף. הוא מופיע ברשימת הנוכחות של הקבוצה.' : 'הפרטים נשמרו.');
+      snack(isNew ? 'נוסף לקורס. השם מופיע ברשימת הנוכחות של הקבוצה.' : 'הפרטים נשמרו.');
       if (isNew) location.hash = `#/tamima/student/${id}`; else render();
     },
     stuRemoveAsk(d) { const s = student(d.id); openSheet(confirmHtml(`להסיר את ${esc(s.name)} מהקורס?`, 'המקום בקבוצה יתפנה. ההיסטוריה, התשלומים והחשבוניות נשמרים, ואפשר להחזיר לקורס בכל רגע. אם נשארו שיעורים שלא נוצלו, ייפתח מסך זיכוי.', 'stuActive', `data-id="${s.id}" data-on="0"`, 'הסרה')); },
@@ -1824,7 +1824,7 @@
         const p = S.payments.filter(x => x.studentId === d.id).sort((a, b) => b.date.localeCompare(a.date) || b.invoice - a.invoice).find(x => refundable(x.invoice) && suggestRefund(invoiceInfo(x.invoice)).amount > 0);
         if (p) { openRefund(p.invoice); return; }
       }
-      snack(d.on === '1' ? 'הסטודנט חזר לקורס.' : 'הסטודנט הוסר מהקורס.');
+      snack(d.on === '1' ? 'החזרה לקורס בוצעה.' : 'ההסרה מהקורס בוצעה.');
     },
     stuUse(d) {
       const s = student(d.id);
@@ -1837,7 +1837,7 @@
       payCard(s, { manual: true });
       S.payments[S.payments.length - 1].manual = true;
       render();
-      snack('התשלום נרשם, והחשבונית נשלחה לסטודנט.');
+      snack('התשלום נרשם, והחשבונית נשלחה במייל.');
     },
     stuPolicyLink(d) {
       const s = student(d.id);
@@ -1848,7 +1848,7 @@
     // הודעת עזיבה שהגיעה ישירות לתמימה: אותו חישוב של תאריך הסיום, בלי חתימה
     stuLeaveOutside(d) {
       const s = student(d.id), e = leaveEndDate(s);
-      openSheet(confirmHtml(`התקבלה הודעת עזיבה מ${esc(s.name)}?`, `${LEAVE_CLAUSE} תאריך הסיום: <b>${longDay(e.date)}</b> (${lessonsUntil(s, e.date)} שיעורים עד אז). הסטודנט יקבל מייל אישור.`, 'stuLeaveOutsideDo', `data-id="${s.id}"`, 'רישום ההודעה'));
+      openSheet(confirmHtml(`התקבלה הודעת עזיבה מ${esc(s.name)}?`, `${LEAVE_CLAUSE} תאריך הסיום: <b>${longDay(e.date)}</b> (${lessonsUntil(s, e.date)} שיעורים עד אז). יישלח מייל אישור.`, 'stuLeaveOutsideDo', `data-id="${s.id}"`, 'רישום ההודעה'));
     },
     stuLeaveOutsideDo(d) {
       const s = student(d.id), e = leaveEndDate(s);
@@ -1867,7 +1867,7 @@
     // הסטודיו מפסיק את ההשתתפות: מוצע החזר על השיעורים שלא נוצלו, פחות דמי הטיפול. שום החזר לא יוצא לבד
     stuStopAsk(d) {
       const s = student(d.id), un = paidUnused(s), sug = Math.max(0, un * perLesson() - S.settings.stopParticipationFee);
-      openSheet(confirmHtml(`הסטודיו מפסיק את ההשתתפות של ${esc(s.name)}?`, `הסטודנט יוצא מהקורס עכשיו, והמקום בקבוצה מתפנה.${lastPayment(s) ? ` ייפתח מסך זיכוי עם הצעה: ${un} שיעורים שלא נוצלו × ${money(perLesson())}, פחות ${money(S.settings.stopParticipationFee)} = ${money(sug)}.` : ''}`, 'stuStop', `data-id="${s.id}"`, 'הפסקת ההשתתפות'));
+      openSheet(confirmHtml(`הסטודיו מפסיק את ההשתתפות של ${esc(s.name)}?`, `היציאה מהקורס היא מעכשיו, והמקום בקבוצה מתפנה.${lastPayment(s) ? ` ייפתח מסך זיכוי עם הצעה: ${un} שיעורים שלא נוצלו × ${money(perLesson())}, פחות ${money(S.settings.stopParticipationFee)} = ${money(sug)}.` : ''}`, 'stuStop', `data-id="${s.id}"`, 'הפסקת ההשתתפות'));
     },
     stuStop(d) {
       const s = student(d.id), un = paidUnused(s), p = lastPayment(s);
@@ -1998,7 +1998,7 @@
           if (x) x.status = 'moved';
           log('notify', `הזזה חד פעמית: ${w.customer.name}`, `נרשם בכרטיס הלקוח (${dmy(todayIso())}). החשבונית נשארת, ולא נפתח זיכוי.`);
         }
-        closeSheet(); render(); snack('הסדנה הוזזה. היומן והערוצים עודכנו, והלקוח קיבל מייל.');
+        closeSheet(); render(); snack('הסדנה הוזזה. היומן והערוצים עודכנו, ונשלח מייל עם המועד החדש.');
         return;
       }
       const ch = G.channels.get(f.ch);
@@ -2010,7 +2010,7 @@
       runSync();
       closeSheet(); render(); snack(`המועד הוזז ל${shortDay(f.date)} ${f.time}.`);
     },
-    wsCancelAsk(d) { const w = workshop(d.id); const paid = isOwn(w) && w.invoice && refundable(w.invoice); openSheet(confirmHtml('לבטל את הסדנה?', `${esc(w.customer.name)}, ${longDay(w.date)} ${w.time}. המועד יחזור להיות פנוי.${paid ? ' אחרי הביטול ייפתח מסך הזיכוי עם החזר מלא מוצע. המייל ללקוח יישלח אחרי ההחלטה שלך.' : ' הלקוח יקבל מייל.'}`, 'wsCancel', `data-id="${w.id}"`, 'ביטול הסדנה')); },
+    wsCancelAsk(d) { const w = workshop(d.id); const paid = isOwn(w) && w.invoice && refundable(w.invoice); openSheet(confirmHtml('לבטל את הסדנה?', `${esc(w.customer.name)}, ${longDay(w.date)} ${w.time}. המועד יחזור להיות פנוי.${paid ? ' אחרי הביטול ייפתח מסך הזיכוי עם החזר מלא מוצע. המייל יישלח אחרי ההחלטה.' : ' יישלח מייל.'}`, 'wsCancel', `data-id="${w.id}"`, 'ביטול הסדנה')); },
     wsCancel(d) {
       const w = workshop(d.id);
       // סדנה ששולמה באתר: תמימה ביטלה, ולכן מוצע החזר מלא בלי קשר למועד. שום החזר לא יוצא לפני ההחלטה שלה
@@ -2075,7 +2075,7 @@
       if (w) { if (w.status !== 'cancelled') dropWorkshop(w); wsCancelMail(w, null); }
       if (x || w) log('notify', 'החלטה: ללא החזר', `${invoiceInfo(f.inv).name}, חשבונית מס׳ ${f.inv}. לא נשלחה קריאה לסאמיט.`);
       ui.rf = null; closeSheet(); render();
-      snack(w ? 'הסדנה בוטלה בלי החזר. הלקוח קיבל מייל.' : 'סומן: ללא החזר.');
+      snack(w ? 'הסדנה בוטלה בלי החזר, ונשלח מייל.' : 'סומן: ללא החזר.');
     },
     // אחר כך: הזיכוי נשאר ב"ממתין לך עכשיו"
     refundLater() {
