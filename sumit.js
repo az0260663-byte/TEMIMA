@@ -40,7 +40,7 @@
     return p ? { ValidPayment: p.valid, Amount: p.amount, DocumentNumber: p.doc, PaymentMethod: { CreditCard_Token: p.token }, CustomerID: p.customerId, ExternalIdentifier: p.ref } : null;
   }
 
-  // מסמך מתוך המערכת (קבלה לסדנה מהסלון): /accounting/documents/create/
+  // מסמך מתוך המערכת (קבלה לסדנה מ"בסלון"): /accounting/documents/create/
   function sumitCreateDocument(customer, desc, amount) {
     const doc = S.nextInvoice++;
     sumitLog(`סאמיט: הופקה חשבונית מס קבלה מס׳ ${doc}`, 'POST', '/accounting/documents/create/', {

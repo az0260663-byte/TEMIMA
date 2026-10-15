@@ -38,7 +38,7 @@
     classes: 'classes.tamima@group.calendar.google.com', // החוגים השבועיים
     personal: 'primary',
     remoteBusy: 'remote.busy.local', // עותק של freebusy מגוגל, רק כשהיומן מחובר
-    // תאימות לממשק הקודם: היומנים של ערוצי הסלון והאתר
+    // תאימות לממשק הקודם: היומנים של ערוץ "בסלון" והאתר
     get salon() { const c = channelList.find(x => x.id === 'salon'); return c && c.calendarId; },
     get site() { const c = channelList.find(x => x.id === HOME); return c && c.calendarId; }
   };

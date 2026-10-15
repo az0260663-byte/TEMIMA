@@ -224,10 +224,10 @@
   }
 
   /* ---------- הזמנה שממתינה לתשלום ----------
-     "לתשלום" יוצר הזמנה בסטטוס "ממתין לתשלום", והמועד נשמר לה ל-5 דקות ולא מוצע לאף אחד אחר.
-     תשלום שנכשל משאיר אותה ממתינה, ואפשר לנסות שוב. אחרי 5 דקות בלי תשלום היא פגה, והמועד משתחרר.
+     המעבר לפרטים יוצר הזמנה בסטטוס "ממתין לתשלום". המועד נשמר ל-10 דקות שמתחדשות כל עוד ממלאים, ולא מוצע לאף אחד אחר.
+     תשלום שנכשל משאיר אותה ממתינה, ואפשר לנסות שוב. אחרי 10 דקות בלי פעילות היא פגה, והמועד משתחרר.
      "שולם" מסומן רק אחרי הודעת שרת מסאמיט (IPN) ואימות התשלום, לא מדף התודה. */
-  const HOLD_MIN = 5;
+  const HOLD_MIN = 10;
   const pendingOrder = id => S.workshops.find(w => w.id === id && w.status === 'pending' && w.holdUntil > now().getTime());
   const holdOf = pendingOrder;
   const heldByOther = (date, time, own) => S.workshops.some(w => w.status === 'pending' && w.date === date && w.time === time && w.id !== own && w.holdUntil > now().getTime());
@@ -238,10 +238,25 @@
     const w = { id: uid('w'), source: HOME, status: 'pending', date: o.date, time: o.time, n: o.n, amount: price(o.n), customer: o.customer, k: token(),
       holdUntil: now().getTime() + HOLD_MIN * 6e4, receipt: 'auto', invoice: null, feedbackSent: false, created: todayIso() };
     S.workshops.push(w);
-    log('sync', `הזמנה חדשה ממתינה לתשלום: ${shortDay(w.date)} ${w.time}`, `${w.customer.name}. המועד שמור לה ל-${HOLD_MIN} דקות, ובזמן הזה לא מוצע לאף אחד אחר.`);
-    sumitBeginRedirect({ id: w.id, customer: w.customer, amount: w.amount, desc: wsDesc(w) });
+    log('sync', `הזמנה בתהליך: ${shortDay(w.date)} ${w.time}`, `המועד שמור ל-${HOLD_MIN} דקות, ומתחדש כל עוד ממלאים את ההזמנה. בזמן הזה הוא לא מוצע לאף אחד אחר, ותמימה רואה אותו ביומן.`);
     return w;
   }
+  // הלקוח עדיין פעיל בהזמנה: השמירה מתחדשת
+  function touchHold(id) {
+    const w = pendingOrder(id);
+    if (w) w.holdUntil = Math.max(w.holdUntil, now().getTime() + HOLD_MIN * 6e4);
+  }
+  // הזמנות בתהליך והזמנות ששולמו שחופפות לזמן מסוים (בדקות מחצות)
+  function bookingsAt(date, s, e) {
+    const n = now().getTime();
+    const hit = w => w.date === date && toMin(w.time) < e && s < toMin(w.time) + X.WORKSHOP_MIN;
+    return {
+      holds: S.workshops.filter(w => w.status === 'pending' && w.holdUntil > n && hit(w)),
+      paid: activeWorkshops().filter(hit)
+    };
+  }
+  // רגע לפני החיוב: אירוע של תמימה לא מבטל הזמנה. רק הזמנה אחרת על אותו זמן מונעת אותה
+  const stillBookable = w => !activeWorkshops().some(x => x.id !== w.id && x.date === w.date && toMin(x.time) < toMin(w.time) + X.WORKSHOP_MIN && toMin(w.time) < toMin(x.time) + X.WORKSHOP_MIN);
   function expireOrder(id, quiet) {
     const w = S.workshops.find(x => x.id === id && x.status === 'pending');
     if (!w) return;
@@ -485,7 +500,7 @@
      המערכת מבצעת זיכוי בכרטיס ומפיקה "חשבונית מס קבלה זיכוי" דרך ה-API של סאמיט. תמימה לא נכנסת לסאמיט. */
   const refundsOf = inv => S.refunds.filter(r => r.invoice === inv);
   const refundedOf = inv => refundsOf(inv).reduce((a, r) => a + r.amount, 0);
-  // פרטי חשבונית: כרטיסייה של סטודנט, או סדנה מהאתר (לסדנה מהסלון אין זיכוי, ההחזר דרך הסלון)
+  // פרטי חשבונית: כרטיסייה של סטודנט, או סדנה מהאתר (לסדנה מ"בסלון" אין זיכוי, ההחזר דרך "בסלון")
   function invoiceInfo(inv) {
     const p = S.payments.find(x => x.invoice === inv);
     if (p) { const s = student(p.studentId); return { inv, kind: 'card', p, s, amount: p.amount, date: p.date, name: s.name, to: toStudent(s), customer: s, token: s.token || '', desc: `כרטיסייה, ${S.settings.cardSize} שיעורים` }; }
@@ -584,7 +599,7 @@
   }
   const hoursTo = w => (at(w.date, w.time) - now()) / 36e5;
 
-  // מסמך לפי מספר: חשבונית של כרטיסייה או של סדנה (מהאתר או מהסלון)
+  // מסמך לפי מספר: חשבונית של כרטיסייה או של סדנה (מהאתר או מ"בסלון")
   function docHtml(inv) {
     const p = S.payments.find(x => x.invoice === inv);
     if (p) return invoiceDoc(inv, student(p.studentId).name, `כרטיסייה, ${S.settings.cardSize} שיעורים`, p.amount, p.date);

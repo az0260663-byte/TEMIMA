@@ -327,6 +327,8 @@
       out.push({ s: toMin(x.time), e: toMin(x.time) + X.WORKSHOP_MIN, kind: 'open', ch: x.channel, key: slotKey(date, x.time), time: x.time,
         label: `פתוח · ${esc(chLabel(ch))}`, act: `data-act="calSlot" data-ch="${x.channel}" data-id="${x.eventId}"` });
     });
+    S.workshops.filter(w => w.status === 'pending' && w.holdUntil > now().getTime() && w.date === date).forEach(w => out.push({ s: toMin(w.time), e: toMin(w.time) + X.WORKSHOP_MIN, kind: 'hold', time: w.time,
+      label: 'בתהליך הזמנה', sub: `עוד ${Math.max(1, Math.ceil((w.holdUntil - now().getTime()) / 6e4))} דק׳`, act: `data-act="calHold" data-id="${w.id}"` }));
     G.channels.pending().filter(q => q.date === date).forEach(q => out.push({ s: toMin(q.time), e: toMin(q.time) + X.WORKSHOP_MIN, kind: 'pend', key: slotKey(date, q.time), time: q.time,
       label: 'ממתין לאתר', sub: whenMs(q.publishAt), act: `data-act="calPending" data-id="${q.id}"` }));
     return out;
@@ -377,7 +379,7 @@
     const H = hpx();
     const px = m => ((m - GRID_FROM) / 60) * H;
     const f = ui.calFilter;
-    const show = k => f === 'all' || (f === 'activity' ? ['class', 'ws', 'na'].includes(k) : ['open', 'pend', 'na'].includes(k));
+    const show = k => f === 'all' || (f === 'activity' ? ['class', 'ws', 'na', 'hold'].includes(k) : ['open', 'pend', 'na', 'hold'].includes(k));
     const bulk = ui.bulk.on;
     const sel = new Set(ui.bulk.sel.map(x => slotKey(x.date, x.time)));
     const flash = new Set(ui.flash || []);
@@ -462,7 +464,7 @@
         </div>
         <div class="cal-tools">
           <div class="seg" role="radiogroup" aria-label="סינון">${[['all', 'הכל'], ['activity', 'פעילות'], ['open', 'פתוח למכירה']].map(([k, l]) => `<button role="radio" aria-checked="${f === k}" class="${f === k ? 'on' : ''}" data-act="calFilter" data-f="${k}">${l}</button>`).join('')}</div>
-          ${bulk ? '' : '<button class="btn primary small" data-act="newSlotForm">+ מועד</button>'}
+          ${bulk ? '' : '<button class="btn ghost small" data-act="evNew">+ אירוע</button><button class="btn primary small" data-act="newSlotForm">+ מועד</button>'}
         </div>
       </div>
       ${mobile ? `<p class="cal-day-sum">${daySummary(days[0])}</p>` : ''}
@@ -1063,15 +1065,157 @@
       ${errP('mvf')}
       <button class="btn primary block" data-act="mvSave" ${f.time ? '' : 'disabled'}>הזזה</button>`;
   }
-  function blockFormHtml() {
-    const hrs = halfHours('07:00', '22:30').map(t => [t, t]);
-    return `<h2>עריכת חסימה</h2>
-      ${fld('bf', 'summary', 'שם (רק תמימה רואה)')}
-      ${pickSel('bf', 'date', 'יום', futureDays(90).map(d => [d, longDay(d)]))}
-      <div class="two">${pickSel('bf', 'start', 'מ', hrs)}${pickSel('bf', 'end', 'עד', hrs)}</div>
-      ${errP('bf')}
-      <button class="btn primary block" data-act="blockSave">שמירה</button>
-      <button class="btn ghost block" data-act="removeBlock" data-id="${ui.bf.id}">הסרת החסימה</button>`;
+  /* ---------- אירוע ביומן: שעות או יום שלם, עם חזרה ----------
+     האירוע של תמימה תמיד נשמר. הוא סוגר את הזמן הפנוי לכל הערוצים, אבל לא מבטל הזמנה של לקוח:
+     לא הזמנה בתהליך ולא הזמנה ששולמה. לפני השמירה מוצגת אזהרה וזמנים חלופיים קרובים. */
+  const DOW_CODE = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+  const evDur = f => (f.allDay ? 1440 : toMin(f.end) - toMin(f.start));
+  // מועדי האירוע ב-120 הימים הקרובים (לאזהרות)
+  function evOccurrences(f, limitDays = 120) {
+    if (!f.date) return [];
+    if (f.repeat === 'none') return [f.date];
+    const start = parse(f.date), maxD = addDays(startOfToday(), limitDays);
+    const untilD = f.endMode === 'until' && f.until ? parse(f.until) : null;
+    const maxN = f.endMode === 'count' ? Math.max(1, Number(f.count) || 1) : Infinity;
+    const days = f.days.length ? f.days : [start.getDay()];
+    const sw = addDays(start, -start.getDay());
+    const out = [];
+    for (let d = start; d <= maxD && out.length < maxN; d = addDays(d, 1)) {
+      if (untilD && d > untilD) break;
+      if (f.repeat === 'daily') { out.push(iso(d)); continue; }
+      const wk = Math.floor(Math.round((d - sw) / 864e5) / 7);
+      if (days.includes(d.getDay()) && wk % (Number(f.interval) || 1) === 0) out.push(iso(d));
+    }
+    return out;
+  }
+  // מה חופף: הזמנות בתהליך, הזמנות ששולמו ושיעורים
+  function evOverlaps(f) {
+    const res = { holds: 0, paid: 0, lessons: 0, first: [] };
+    const span = f.allDay ? Math.max(0, Math.round((parse(f.toDate || f.date) - parse(f.date)) / 864e5)) : 0;
+    evOccurrences(f).forEach(d0 => {
+      for (let k = 0; k <= span; k++) {
+        const d = iso(addDays(parse(d0), k));
+        const s = f.allDay ? 0 : toMin(f.start), e = f.allDay ? 1440 : toMin(f.end);
+        const b = bookingsAt(d, s, e);
+        const ls = S.lessons.filter(l => l.date === d && !l.cancelled && group(l.groupId).active !== false && toMin(l.start || group(l.groupId).start) < e && s < toMin(l.end || group(l.groupId).end));
+        res.holds += b.holds.length; res.paid += b.paid.length; res.lessons += ls.length;
+        if ((b.holds.length || b.paid.length || ls.length) && res.first.length < 3) res.first.push(shortDay(d));
+      }
+    });
+    return res;
+  }
+  // שלושה זמנים פנויים קרובים באותו אורך (רק לאירוע חד פעמי בשעות)
+  function evAlternatives(f) {
+    if (f.allDay || f.repeat !== 'none' || !f.date) return [];
+    const dur = evDur(f);
+    if (!(dur > 0)) return [];
+    const out = [];
+    for (let k = 0; k < 4 && out.length < 3; k++) {
+      const d = iso(addDays(parse(f.date), k));
+      if (parse(d).getDay() === 6) continue;
+      const b = busy(d);
+      for (let m = 8 * 60; m + dur <= 22 * 60 && out.length < 3; m += 30) {
+        if (d === f.date && fromMin(m) === f.start) continue;
+        if (at(d, fromMin(m)) <= now()) continue;
+        const iv = { s: m, e: m + dur };
+        if (b.some(x => overlaps(x, iv))) continue;
+        const bk2 = bookingsAt(d, m, m + dur);
+        if (bk2.holds.length || bk2.paid.length) continue;
+        out.push({ date: d, start: fromMin(m), end: fromMin(m + dur) });
+      }
+    }
+    return out;
+  }
+  function rruleFor(f) {
+    if (f.repeat === 'none') return null;
+    const parts = [`FREQ=${f.repeat === 'daily' ? 'DAILY' : 'WEEKLY'}`];
+    if (f.repeat === 'weekly') {
+      parts.push(`INTERVAL=${Math.max(1, Number(f.interval) || 1)}`);
+      parts.push('BYDAY=' + (f.days.length ? f.days : [parse(f.date).getDay()]).slice().sort().map(i => DOW_CODE[i]).join(','));
+    }
+    if (f.endMode === 'count') parts.push(`COUNT=${Math.min(200, Math.max(1, Number(f.count) || 1))}`);
+    else parts.push(`UNTIL=${f.until.replace(/-/g, '')}T235959Z`);
+    return 'RRULE:' + parts.join(';');
+  }
+  // תיאור החזרה במילים
+  function rruleText(rule) {
+    const p = Object.fromEntries(rule.slice(6).split(';').map(x => x.split('=')));
+    const n = Number(p.INTERVAL) || 1;
+    let t = p.FREQ === 'DAILY' ? 'חוזר כל יום' : `חוזר ${n === 1 ? 'כל שבוע' : n === 2 ? 'כל שבועיים' : `כל ${n} שבועות`}`;
+    if (p.BYDAY) t += ` בימים ${p.BYDAY.split(',').map(c => DAYS_SHORT[DOW_CODE.indexOf(c)]).join(', ')}`;
+    if (p.COUNT) t += `, ${p.COUNT} פעמים`;
+    if (p.UNTIL) t += `, עד ${dmy(`${p.UNTIL.slice(0, 4)}-${p.UNTIL.slice(4, 6)}-${p.UNTIL.slice(6, 8)}`)}`;
+    return t + '.';
+  }
+  function evFormHtml() {
+    const f = ui.evf;
+    const hrs = halfHours('07:00', '23:00').map(t => [t, t]);
+    const ov = evOverlaps(f), alts = ov.holds || ov.paid || ov.lessons ? evAlternatives(f) : [];
+    const warn = [];
+    if (ov.holds) warn.push(ov.holds === 1 ? 'לקוח באמצע הזמנה בזמן הזה' : `${ov.holds} לקוחות באמצע הזמנה בזמנים האלה`);
+    if (ov.paid) warn.push(ov.paid === 1 ? 'סדנה שכבר שולמה' : `${ov.paid} סדנאות שכבר שולמו`);
+    if (ov.lessons) warn.push(ov.lessons === 1 ? 'שיעור של קבוצה' : `${ov.lessons} שיעורים של קבוצות`);
+    const title = f.id ? (f.scope === 'one' ? 'עריכת המופע הזה' : 'עריכת האירוע') : 'אירוע חדש';
+    return `<h2>${title}</h2>
+      ${fld('evf', 'summary', 'שם האירוע <small class="hint-inline">רק תמימה רואה</small>', 'maxlength="80"')}
+      <label class="consent"><input type="checkbox" data-bind="evf.allDay" data-rerender="sheet" ${f.allDay ? 'checked' : ''}><span>יום שלם</span></label>
+      ${f.allDay
+        ? `<div class="two"><label class="field"><span>מתאריך</span><input type="date" min="${todayIso()}" data-bind="evf.date" data-rerender="sheet" value="${esc(f.date)}"></label><label class="field"><span>עד תאריך</span><input type="date" min="${esc(f.date)}" data-bind="evf.toDate" data-rerender="sheet" value="${esc(f.toDate)}"></label></div>`
+        : `<label class="field"><span>תאריך</span><input type="date" min="${todayIso()}" data-bind="evf.date" data-rerender="sheet" value="${esc(f.date)}"></label>
+          <div class="two">${pickSel('evf', 'start', 'משעה', hrs, true)}${pickSel('evf', 'end', 'עד שעה', hrs, true)}</div>`}
+      ${f.scope === 'one' ? '' : `${pickSel('evf', 'repeat', 'חזרה', [['none', 'בלי חזרה'], ['daily', 'כל יום'], ['weekly', 'כל שבוע, בימים שבוחרים']], true)}
+      ${f.repeat === 'weekly' ? `<p class="small" id="ev-days-l">בימים</p><div class="ev-days" role="group" aria-labelledby="ev-days-l">${DAYS_SHORT.map((x, i) => `<button type="button" data-act="evDay" data-d="${i}" aria-pressed="${f.days.includes(i)}" aria-label="יום ${DAYS[i]}">${x}</button>`).join('')}</div>
+        ${pickSel('evf', 'interval', 'כל כמה שבועות', [[1, 'כל שבוע'], [2, 'כל שבועיים'], [3, 'כל 3 שבועות'], [4, 'כל 4 שבועות']], true)}` : ''}
+      ${f.repeat !== 'none' ? `${pickSel('evf', 'endMode', 'עד מתי', [['until', 'עד תאריך'], ['count', 'מספר פעמים']], true)}
+        ${f.endMode === 'count' ? fld('evf', 'count', 'כמה פעמים', 'type="number" min="1" max="200" inputmode="numeric" data-rerender="sheet"') : `<label class="field"><span>עד תאריך</span><input type="date" min="${esc(f.date)}" data-bind="evf.until" data-rerender="sheet" value="${esc(f.until)}"></label>`}` : ''}`}
+      ${warn.length ? `<div class="policy warn"><b>יש בזמן הזה: ${warn.join(', ')}${ov.first.length ? ` (${ov.first.join(', ')})` : ''}.</b>האירוע יישמר, וההזמנות והשיעורים נשארים כמו שהם. אפשר לבחור זמן אחר.</div>
+        ${alts.length ? `<p class="small">זמנים פנויים קרובים:</p><div class="ev-alts">${alts.map(x => `<button class="btn ghost small" data-act="evAlt" data-date="${x.date}" data-s="${x.start}" data-e="${x.end}">${shortDay(x.date)} ${x.start} עד ${x.end}</button>`).join('')}</div>` : ''}` : ''}
+      ${errP('evf')}
+      <button class="btn primary block" data-act="evSave">${f.id ? 'שמירה' : 'הוספה ליומן'}</button>`;
+  }
+  // גוף האירוע ליומן גוגל
+  function evBody(f, withRule) {
+    const summary = String(f.summary || '').trim() || 'אירוע';
+    const rule = withRule ? rruleFor(f) : null;
+    // מופעים שנמחקו קודם נשארים מחוקים, גם כשהשעה של הסדרה משתנה
+    const ex = (f.keepEx || []).map(x => (f.allDay || !/T\d{6}/.test(x) ? x : x.replace(/T\d{6}/g, `T${f.start.replace(':', '')}00`)));
+    const extra = rule ? { recurrence: [rule].concat(ex) } : {};
+    if (!f.allDay) return blockBody(f.date, f.start, f.end, summary, extra);
+    return Object.assign({ summary, colorId: '8', visibility: 'private', start: { date: f.date }, end: { date: iso(addDays(parse(f.toDate || f.date), 1)) },
+      extendedProperties: { private: { app: APP, kind: 'block' } } }, extra);
+  }
+  // מילוי הטופס מאירוע קיים: כל הסדרה, או מופע אחד
+  function evFromEvent(ev, master, scope) {
+    const src = scope === 'one' ? ev : master || ev;
+    const allDay = !!src.start.date;
+    const f = { id: (master || ev).id, scope, instId: ev.id, inst: ev.originalStartTime ? (ev.originalStartTime.dateTime || ev.originalStartTime.date) : null,
+      summary: src.summary === 'חסימה אישית' ? '' : src.summary || '', allDay,
+      date: allDay ? src.start.date : G.msToWall(G.edgeMs(src.start)).slice(0, 10),
+      start: allDay ? '10:00' : G.msToWall(G.edgeMs(src.start)).slice(11, 16), end: allDay ? '12:00' : G.msToWall(G.edgeMs(src.end)).slice(11, 16),
+      toDate: allDay ? iso(addDays(parse(src.end.date), -1)) : '', repeat: 'none', interval: 1, days: [], endMode: 'until', until: '', count: 8, keepEx: [], err: '', errField: '' };
+    const rule = scope === 'series' && (src.recurrence || []).find(r => r.startsWith('RRULE:'));
+    if (rule) {
+      const p = Object.fromEntries(rule.slice(6).split(';').map(x => x.split('=')));
+      f.repeat = p.FREQ === 'DAILY' ? 'daily' : 'weekly';
+      f.interval = Number(p.INTERVAL) || 1;
+      f.days = (p.BYDAY || '').split(',').filter(Boolean).map(c => DOW_CODE.indexOf(c)).filter(i => i >= 0);
+      if (p.COUNT) { f.endMode = 'count'; f.count = Number(p.COUNT); }
+      if (p.UNTIL) f.until = `${p.UNTIL.slice(0, 4)}-${p.UNTIL.slice(4, 6)}-${p.UNTIL.slice(6, 8)}`;
+      f.keepEx = src.recurrence.filter(r => r.startsWith('EXDATE'));
+    }
+    return f;
+  }
+  const exdateFor = inst => (/T/.test(inst) ? `EXDATE;TZID=${G.TZ}:${inst.slice(0, 19).replace(/[-:]/g, '')}` : `EXDATE;VALUE=DATE:${inst.replace(/-/g, '')}`);
+  // אירוע לפי מזהה, כולל מופע של אירוע חוזר (בשעות או ביום שלם)
+  function evGet(id) {
+    const e = safeGet(CAL.studio, id);
+    if (e) return e;
+    const t = instanceOf(CAL.studio, id);
+    if (t) return t;
+    const m = String(id).match(/_(\d{4})(\d{2})(\d{2})$/);
+    if (!m) return null;
+    const d = `${m[1]}-${m[2]}-${m[3]}`;
+    return G.events.list({ calendarId: CAL.studio, ...dayRange(d, d), singleEvents: true }).items.find(x => x.id === id) || null;
   }
 
   /* ---------- תוכן האתר (לשונית ב"עוד") ---------- */
@@ -1195,10 +1339,10 @@
       displaced.forEach(x => { try { G.channels.assign(date, x.time, x.channel); } catch (e) { /* הזמן נתפס בינתיים */ } });
     });
   }
-  function blockBody(date, time, end, summary) {
-    return { summary: summary || 'חסימה אישית', colorId: '8', visibility: 'private',
+  function blockBody(date, time, end, summary, extra = {}) {
+    return Object.assign({ summary: summary || 'חסימה אישית', colorId: '8', visibility: 'private',
       start: { dateTime: `${date}T${time}:00`, timeZone: G.TZ }, end: { dateTime: `${date}T${end}:00`, timeZone: G.TZ },
-      extendedProperties: { private: { app: APP, kind: 'block' } } };
+      extendedProperties: { private: { app: APP, kind: 'block' } } }, extra);
   }
   function blockWithUndo(date, time) {
     const ev = G.events.insert({ calendarId: CAL.studio, requestBody: blockBody(date, time, endOf(time)) });
@@ -1578,27 +1722,117 @@
       openSheet(() => `<h2>תפוס ביומן האישי</h2><p class="muted">${longDay(d.date)}, ${fromMin(+d.s)} עד ${fromMin(+d.e)}</p>
         <p class="small">המערכת קוראת מהיומן האישי רק "תפוס או פנוי" (freebusy), בלי כותרת ובלי פרטים. הזמן הזה לא מוצע באף ערוץ.</p>`);
     },
+    // אירוע ביומן (גם חסימה ישנה): פרטים, ומחיקה או עריכה של מופע אחד או של כל הסדרה
     calBlock(d) {
       openSheet(() => {
-        const ev = safeGet(CAL.studio, d.id);
+        const ev = evGet(d.id);
         if (!ev || ev.status === 'cancelled') return '';
-        return `<h2>חסימה אישית</h2><p class="muted">${whenOf(ev)}</p>${ev.summary !== 'חסימה אישית' ? `<p>${esc(ev.summary)}</p>` : ''}
-        <p class="small muted">נשמרת ביומן הגוגל כאירוע פרטי. הערוצים רואים רק שהזמן לא פנוי.</p>
-        <button class="btn primary block" data-act="blockEdit" data-id="${ev.id}">עריכה</button>
-        <button class="btn ghost block" data-act="removeBlock" data-id="${ev.id}">הסרת החסימה</button>${ui.guided ? eventJson(ev, CAL.studio) : ''}`;
+        const master = ev.recurringEventId ? safeGet(CAL.studio, ev.recurringEventId) : null;
+        const rule = ((master || ev).recurrence || []).find(r => r.startsWith('RRULE:'));
+        const s = G.msToWall(G.edgeMs(ev.start)), e = G.msToWall(G.edgeMs(ev.end));
+        const b = ev.start.date ? { holds: [], paid: [] } : bookingsAt(s.slice(0, 10), toMin(s.slice(11, 16)), toMin(e.slice(11, 16)));
+        const both = b.holds.length || b.paid.length;
+        const rec = !!(master && rule);
+        return `<h2>${esc(ev.summary && ev.summary !== 'חסימה אישית' ? ev.summary : 'אירוע')}</h2><p class="muted">${whenOf(ev)}</p>
+          ${rule ? `<p class="small">${rruleText(rule)}</p>` : ''}
+          ${both ? '<p class="policy warn">יש הזמנה באותו זמן. האירוע נשמר, והסדנה נשארת.</p>' : ''}
+          <p class="small muted">נשמר ביומן הגוגל של הסטודיו כאירוע פרטי. הערוצים רואים רק שהזמן לא פנוי.</p>
+          ${rec
+            ? `<button class="btn primary block" data-act="blockEdit" data-id="${ev.id}" data-scope="one">עריכת המופע הזה</button>
+               <button class="btn ghost block" data-act="blockEdit" data-id="${ev.id}" data-scope="series">עריכת כל הסדרה</button>
+               <button class="btn ghost block" data-act="removeBlockOne" data-id="${ev.id}">מחיקת המופע הזה</button>
+               <button class="btn ghost block" data-act="removeBlock" data-id="${master.id}">מחיקת כל הסדרה</button>`
+            : `<button class="btn primary block" data-act="blockEdit" data-id="${ev.id}" data-scope="series">עריכה</button>
+               <button class="btn ghost block" data-act="removeBlock" data-id="${ev.id}">מחיקה</button>`}
+          ${ui.guided ? eventJson(master || ev, CAL.studio) : ''}`;
       });
     },
+    // לקוח באמצע הזמנה: בלי פרטים אישיים
+    calHold(d) {
+      openSheet(() => {
+        const w = workshop(d.id);
+        if (!w || w.status !== 'pending') return '';
+        const left = Math.max(1, Math.ceil((w.holdUntil - now().getTime()) / 6e4));
+        return `<h2>בתהליך הזמנה</h2><p class="muted">${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}</p>
+          <p>לקוח באמצע הזמנה באתר. המועד שמור עוד ${left} דקות, ומתחדש כל עוד ממלאים את ההזמנה.</p>
+          <p class="small muted">אם יתווסף אירוע בזמן הזה, ההזמנה לא תתבטל. אם לא יהיה תשלום, המועד יתפנה לבד.</p>`;
+      });
+    },
+    blockEdit(d) {
+      const ev = evGet(d.id);
+      const master = ev.recurringEventId ? G.events.get({ calendarId: CAL.studio, eventId: ev.recurringEventId }) : null;
+      ui.evf = evFromEvent(ev, master, d.scope || 'series');
+      openSheet(evFormHtml);
+    },
     removeBlock(d) {
-      const ev = G.events.get({ calendarId: CAL.studio, eventId: d.id });
+      const ev = evGet(d.id);
+      const body = JSON.parse(JSON.stringify(ev));
+      ['id', 'etag', 'htmlLink', 'iCalUID', 'created', 'updated', 'status', 'kind'].forEach(k => delete body[k]);
       G.events.delete({ calendarId: CAL.studio, eventId: d.id });
-      log('sync', 'חסימה הוסרה', `${whenOf(ev)} חזר להיות פנוי.`);
+      log('sync', 'אירוע הוסר מהיומן', `${whenOf(ev)}${ev.recurrence ? ', כל הסדרה' : ''}. הזמן חזר להיות פנוי.`);
       runSync();
       closeSheet(); render();
-      const sp = G.msToWall(G.edgeMs(ev.start)), ep = G.msToWall(G.edgeMs(ev.end));
-      snack('החסימה הוסרה', () => {
-        G.events.insert({ calendarId: CAL.studio, requestBody: blockBody(sp.slice(0, 10), sp.slice(11, 16), ep.slice(11, 16), ev.summary) });
-        runSync();
-      });
+      snack('האירוע הוסר', () => { G.events.insert({ calendarId: CAL.studio, requestBody: body }); runSync(); render(); });
+    },
+    removeBlockOne(d) {
+      const ev = evGet(d.id);
+      const master = G.events.get({ calendarId: CAL.studio, eventId: ev.recurringEventId });
+      const before = master.recurrence.slice();
+      G.events.patch({ calendarId: CAL.studio, eventId: master.id, requestBody: { recurrence: before.concat(exdateFor(ev.originalStartTime.dateTime || ev.originalStartTime.date)) } });
+      log('sync', 'מופע אחד הוסר מהיומן', `${whenOf(ev)}. שאר הסדרה נשארת.`);
+      runSync();
+      closeSheet(); render();
+      snack('המופע הוסר', () => { G.events.patch({ calendarId: CAL.studio, eventId: master.id, requestBody: { recurrence: before } }); runSync(); render(); });
+    },
+    evNew(d) {
+      const date = (d && d.date) || (ui.calDay && calWeek().includes(ui.calDay) ? ui.calDay : todayIso());
+      const start = (d && d.t) || '10:00';
+      ui.evf = { id: null, scope: 'series', summary: '', allDay: false, date: date < todayIso() ? todayIso() : date, start, end: fromMin(Math.min(toMin(start) + 120, 23 * 60)), toDate: '',
+        repeat: 'none', interval: 1, days: [], endMode: 'until', until: iso(addMonths(startOfToday(), 2)), count: 8, keepEx: [], err: '', errField: '' };
+      openSheet(evFormHtml);
+    },
+    evDay(d) {
+      const f = ui.evf, i = Number(d.d);
+      f.days = f.days.includes(i) ? f.days.filter(x => x !== i) : f.days.concat(i);
+      renderSheet();
+      ui.focusSel = `#sheet [data-act="evDay"][data-d="${i}"]`; focusPending();
+    },
+    evAlt(d) { Object.assign(ui.evf, { date: d.date, start: d.s, end: d.e }); renderSheet(); },
+    evSave() {
+      const f = ui.evf;
+      const bad = (field, msg) => { f.err = msg; f.errField = field; renderSheet(); return false; };
+      if (!f.date) return bad('date', 'נא לבחור תאריך.');
+      if (!f.id && f.date < todayIso()) return bad('date', 'אי אפשר להוסיף אירוע לתאריך שעבר.');
+      if (!f.allDay && !(toMin(f.end) > toMin(f.start))) return bad('end', 'שעת הסיום צריכה להיות אחרי שעת ההתחלה.');
+      if (f.allDay) {
+        if (!f.toDate) f.toDate = f.date;
+        if (f.toDate < f.date) return bad('toDate', 'תאריך הסיום לפני תאריך ההתחלה.');
+        if ((parse(f.toDate) - parse(f.date)) / 864e5 >= 60) return bad('toDate', 'אפשר עד 60 ימים באירוע אחד.');
+      }
+      if (f.scope !== 'one' && f.repeat !== 'none') {
+        if (f.endMode === 'until' && !(f.until && f.until >= f.date)) return bad('until', 'נא לבחור תאריך סיום לחזרה, אחרי תאריך ההתחלה.');
+        if (f.endMode === 'count' && !(Number(f.count) >= 1 && Number(f.count) <= 200)) return bad('count', 'מספר הפעמים צריך להיות בין 1 ל-200.');
+      }
+      const ov = evOverlaps(f);
+      let newId = null;
+      if (f.id && f.scope === 'one') {
+        // מופע אחד: יוצא מהסדרה, ונשמר כאירוע נפרד בזמן החדש
+        const master = G.events.get({ calendarId: CAL.studio, eventId: f.id });
+        G.events.patch({ calendarId: CAL.studio, eventId: f.id, requestBody: { recurrence: master.recurrence.concat(exdateFor(f.inst)) } });
+        newId = G.events.insert({ calendarId: CAL.studio, requestBody: evBody(f, false) }).id;
+      } else if (f.id) {
+        const body = evBody(f, true);
+        if (!body.recurrence) body.recurrence = [];
+        G.events.patch({ calendarId: CAL.studio, eventId: f.id, requestBody: body });
+      } else {
+        newId = G.events.insert({ calendarId: CAL.studio, requestBody: evBody(f, true) }).id;
+      }
+      const name = String(f.summary || '').trim() || 'אירוע';
+      log('sync', f.id ? `אירוע עודכן: ${name}` : `אירוע נוסף ליומן: ${name}`, `${f.allDay ? `יום שלם, ${shortDay(f.date)}${f.toDate && f.toDate !== f.date ? ` עד ${shortDay(f.toDate)}` : ''}` : `${shortDay(f.date)} ${f.start} עד ${f.end}`}${f.scope !== 'one' && f.repeat !== 'none' ? `. ${rruleText(rruleFor(f))}` : '.'} זמנים פנויים חופפים ירדו מכל הערוצים.`);
+      runSync();
+      closeSheet(); render();
+      const msg = ov.holds || ov.paid ? 'יש הזמנה באותו זמן. האירוע נשמר, והסדנה נשארת.' : f.id ? 'האירוע עודכן ביומן.' : 'האירוע נוסף ליומן. זמנים פנויים חופפים ירדו מכל הערוצים.';
+      snack(msg, !f.id && newId ? () => { G.events.delete({ calendarId: CAL.studio, eventId: newId }); runSync(); render(); } : null);
     },
     calEvent(d) {
       openSheet(() => {
@@ -2088,19 +2322,6 @@
     wsRestore(d) { const err = setWorkshopCancelled(d.id, false); closeSheet(); render(); snack(err || 'הסדנה חזרה ליומן.'); },
 
     /* ---------- עריכה: חסימות ---------- */
-    blockEdit(d) {
-      const ev = G.events.get({ calendarId: CAL.studio, eventId: d.id });
-      const sp = G.msToWall(G.edgeMs(ev.start)), ep = G.msToWall(G.edgeMs(ev.end));
-      ui.bf = { id: ev.id, summary: ev.summary, date: sp.slice(0, 10), start: sp.slice(11, 16), end: ep.slice(11, 16), err: '' };
-      openSheet(blockFormHtml);
-    },
-    blockSave() {
-      const f = ui.bf;
-      if (!TIME_OK.test(f.start) || !TIME_OK.test(f.end) || f.end <= f.start) { f.err = 'שעת הסיום צריכה להיות אחרי שעת ההתחלה.'; renderSheet(); return; }
-      G.events.patch({ calendarId: CAL.studio, eventId: f.id, requestBody: { summary: String(f.summary || '').trim() || 'חסימה אישית', start: { dateTime: `${f.date}T${f.start}:00`, timeZone: G.TZ }, end: { dateTime: `${f.date}T${f.end}:00`, timeZone: G.TZ } } });
-      runSync();
-      closeSheet(); render(); snack('החסימה עודכנה. מועדים שחופפים לה ירדו מכל הערוצים.');
-    },
     wsTab(d) { ui.wsTab = d.t; render(); },
     wsSheet(d) { openSheet(() => workshopSheetHtml(d.id)); },
     customerSheet(d) { openSheet(() => customerSheetHtml(d.id)); },

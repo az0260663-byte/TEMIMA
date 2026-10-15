@@ -371,7 +371,16 @@
     // לקוח
     startBooking() { releaseHold(bk.hold); bk = { hold: null, step: 'slot', n: bk.n || 2, date: null, time: null, name: '', phone: '', email: '', err: '', errField: '', marketing: false, done: null }; },
     bkN(d) { bk.n = Math.min(6, Math.max(2, bk.n + Number(d.d))); render(); },
-    bkGo(d) { if (d.s === 'slot') { releaseHold(bk.hold); bk.hold = null; } bk.err = ''; bk.step = d.s; render(); scrollTop(); },
+    bkGo(d) {
+      if (d.s === 'slot') { releaseHold(bk.hold); bk.hold = null; }
+      // "להמשך" לפרטים: המועד נשמר ללקוח, ותמימה רואה אותו ביומן כ"בתהליך הזמנה"
+      if (d.s === 'details' && !pendingOrder(bk.hold)) {
+        if (!freeSlots(bk.date, bk.hold).includes(bk.time)) { bk.time = null; bk.err = 'המועד שבחרתם נתפס בינתיים. בחרו מועד אחר.'; render(); return; }
+        bk.hold = createOrder({ date: bk.date, time: bk.time, n: bk.n, customer: { name: '', phone: '', email: '' } }, bk.hold).id;
+      }
+      touchHold(bk.hold);
+      bk.err = ''; bk.step = d.s; render(); scrollTop();
+    },
     bkDate(d) { bk.date = d.date; bk.time = null; render(); },
     bkTime(d) { bk.time = d.t; render(); },
     bkDetails() {
@@ -386,15 +395,16 @@
     },
     // "לתשלום": נוצרת הזמנה בסטטוס "ממתין לתשלום", ונוצר דף תשלום בסאמיט
     bkToPay() {
-      if (!freeSlots(bk.date, bk.hold).includes(bk.time)) { releaseHold(bk.hold); bk.hold = null; bk.step = 'slot'; bk.time = null; bk.err = 'המועד שבחרתם נתפס בינתיים. בחרו מועד אחר.'; }
-      else {
-        const w = createOrder({ date: bk.date, time: bk.time, n: bk.n, customer: { name: bk.name.trim(), phone: bk.phone.trim(), email: bk.email.trim() } }, bk.hold);
-        bk.hold = w.id; bk.err = ''; bk.step = 'pay';
-      }
+      const w = pendingOrder(bk.hold);
+      if (!w) return A.bkExpire();
+      Object.assign(w.customer, { name: bk.name.trim(), phone: bk.phone.trim(), email: bk.email.trim() });
+      touchHold(w.id);
+      sumitBeginRedirect({ id: w.id, customer: w.customer, amount: w.amount, desc: wsDesc(w) });
+      bk.err = ''; bk.step = 'pay';
       render(); scrollTop();
     },
     bkPayBack() { bk.err = ''; bk.step = 'summary'; render(); },
-    // עברו 5 דקות בלי תשלום: ההזמנה פגה, המועד משתחרר, והלקוח חוזר לבחירת מועד
+    // עברו 10 דקות בלי פעילות: ההזמנה פגה, המועד משתחרר, והלקוח חוזר לבחירת מועד
     bkExpire() {
       expireOrder(bk.hold); bk.hold = null;
       bk.step = 'slot'; bk.time = null; bk.err = `עברו ${HOLD_MIN} דקות, והמועד שוחרר. אפשר לבחור מועד שוב.`;
@@ -411,6 +421,11 @@
     bkPay() {
       const w0 = pendingOrder(bk.hold);
       if (!w0) return A.bkExpire();
+      // בדיקה חוזרת רגע לפני החיוב: אם המועד כבר לא זמין, הלקוח לא מחויב
+      if (!stillBookable(w0)) {
+        expireOrder(w0.id, true); bk.hold = null; bk.step = 'slot'; bk.time = null;
+        bk.err = 'המועד כבר לא זמין, ולא בוצע חיוב. בחרו מועד אחר.'; render(); scrollTop(); return;
+      }
       // הלקוח משלם בדף של סאמיט. סאמיט מפיק חשבונית מס קבלה, שומר טוקן ושולח הודעת שרת (IPN)
       const paymentId = sumitCustomerPaid({ id: w0.id, amount: w0.amount });
       bk.err = ''; bk.step = 'confirming'; render(); scrollTop();

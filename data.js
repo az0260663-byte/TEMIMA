@@ -61,7 +61,7 @@
       extendedProperties: { private: { app: 'tamima-studio', kind: 'workshop', source: w.source, workshopId: w.id, participants: String(w.n) } }
     };
   }
-  // תאימות: משאב משבצת של ערוץ הסלון. המשבצות עצמן נכתבות דרך GCal.channels.assign.
+  // תאימות: משאב משבצת של ערוץ "בסלון". המשבצות עצמן נכתבות דרך GCal.channels.assign.
   function salonSlotEvent(date, time) {
     const TZ = window.GCal.TZ;
     return {
@@ -184,7 +184,7 @@
     // נתוני הדגמה: שתי סדנאות (אישה וגבר). [ימים מהיום, שעה מועדפת, ערוץ, משתתפים, שם]
     const ws = [
       [3, '12:30', 'site', 3, 'מיכל אברהם'],   // קרובה, מהאתר: שולמה וקבלה אוטומטית
-      [-3, '15:00', 'salon', 4, 'יוסי מזרחי']  // עברה, מהסלון: מחכה לקבלה ידנית
+      [-3, '15:00', 'salon', 4, 'יוסי מזרחי']  // עברה, מ"בסלון": מחכה לקבלה ידנית
     ];
     const customers = [];
     ws.forEach(([off, t, source, n, name], i) => {
