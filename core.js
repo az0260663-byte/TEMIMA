@@ -168,6 +168,7 @@
     S.customers = S.customers.filter(x => x.id !== d.id);
     S.customers.forEach(x => { x.notSame = (x.notSame || []).filter(i => i !== d.id); });
     log('notify', `כרטיסי לקוח אוחדו: ${k.name}`, `ההזמנות והחשבוניות של ${d.name} עברו לכרטיס אחד.`);
+    audit('איחוד כרטיסי לקוח', 'תמימה', `${k.name} (ו${d.name})`);
   }
   const customerWorkshops = id => S.workshops.filter(w => w.customerId === id && !['pending', 'expired'].includes(w.status)).sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
 
@@ -394,6 +395,49 @@
       const p = lastPayment(s);
       if (p) openRefundCase({ inv: p.invoice, reason: 'leave', studentId: s.id, suggested: null, info: `שיעורים ששולמו ולא נוצלו עד תאריך הסיום: ${paidUnused(s)} (מחיר לשיעור: ${money(perLesson())})` });
     });
+  }
+
+  /* ---------- יומן פעולות: זיכוי, אנונימיזציה ושינוי פרטים ----------
+     פעולה, מי, על מי, מתי. בדמו אין כניסה למערכת, ולכן "מי" הוא התפקיד; בגרסה האמיתית: המשתמש המחובר. */
+  function audit(action, who, target) {
+    if (!S.audit) S.audit = [];
+    S.audit.unshift({ id: uid('au'), at: new Date().toISOString(), action, who, target });
+  }
+  const dateTime = isoStr => { const d = new Date(isoStr); return `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()} ${clock(d)}`; };
+
+  /* ---------- אנונימיזציה: נמחקים שם, טלפון ומייל. הקבלות, הסכומים והתאריכים נשמרים ---------- */
+  const REMOVED = { student: 'סטודנט שהוסר', customer: 'לקוח שהוסר' };
+  function scrubPerson(old, label) {
+    const words = [old.email].concat(old.phones || []).filter(Boolean);
+    const swap = t => { let x = String(t == null ? '' : t); if (old.name) x = x.split(old.name).join(label); words.forEach(v => { x = x.split(v).join(''); }); return x; };
+    S.log.forEach(e => { e.title = swap(e.title); e.body = swap(e.body); });
+    (S.audit || []).forEach(a => { a.target = swap(a.target); });
+    S.mail.outbox.forEach(m => { if (old.email && m.to === old.email) m.to = ''; m.toName = swap(m.toName); m.subject = swap(m.subject); m.text = swap(m.text); m.html = swap(m.html); if (m.cta) m.cta = [swap(m.cta[0]), m.cta[1]]; });
+    const nps = (old.phones || []).map(normPhone).filter(Boolean);
+    S.leads.forEach(l => { if ((old.email && l.email === old.email) || (l.phone && nps.includes(normPhone(l.phone)))) Object.assign(l, { name: label, phone: '', email: '' }); });
+  }
+  function anonymize(kind, id, who) {
+    if (kind === 'student') {
+      const s = student(id);
+      if (!s) return;
+      const old = { name: s.name, email: s.email, phones: [s.phone] };
+      if (s.active !== false) deactivateStudent(s);
+      Object.assign(s, { name: REMOVED.student, phone: '', email: '', notes: '', k: null, anonymizedAt: new Date().toISOString() });
+      if (s.leave) s.leave.name = '';
+      (S.customers || []).forEach(c => { if (c.studentId === id) c.studentId = null; });
+      scrubPerson(old, REMOVED.student);
+    } else {
+      const c = customer(id);
+      if (!c) return;
+      const ws = S.workshops.filter(w => w.customerId === id);
+      const old = { name: c.name, email: c.email, phones: c.phones.concat(ws.map(w => w.customer.phone)) };
+      ws.forEach(w => { w.customer = { name: REMOVED.customer, phone: '', email: '' }; });
+      Object.assign(c, { name: REMOVED.customer, phones: [], email: '', marketing: false, marketingAt: '', notSame: [], anonymizedAt: new Date().toISOString() });
+      scrubPerson(old, REMOVED.customer);
+    }
+    (S.privacyRequests || []).forEach(r => { if (r.targetKind === kind && r.targetId === id && r.status === 'open') r.status = 'done'; });
+    log('notify', 'אנונימיזציה', `${REMOVED[kind]}: נמחקו שם, טלפון ומייל. הקבלות נשמרו.`);
+    audit('אנונימיזציה', who, `${REMOVED[kind]} (מזהה ${id})`);
   }
 
   function log(kind, title, body) { S.log.unshift({ id: uid('e'), at: new Date(), kind, title, body: body || '' }); }
@@ -669,6 +713,8 @@
     policyLink: ['סטודנטים', 'קישור לאישור המדיניות'],
     newBooking: ['תמימה', 'הזמנה חדשה'],
     customerCancel: ['תמימה', 'ביטול סדנה מ"ההזמנה שלי"'],
+    lateRequest: ['תמימה', 'פנייה מאוחרת לביטול'],
+    privacyRequest: ['תמימה', 'בקשת עיון או מחיקה'],
     refundFailed: ['תמימה', 'זיכוי נכשל'],
     leaveAlert: ['תמימה', 'הודעת עזיבה של סטודנט'],
     newLead: ['תמימה', 'פנייה חדשה לקורס'],

@@ -200,7 +200,7 @@
         ${nav}
       </aside>
       <div class="tmain">
-        <header class="t-head"><span class="t-hello">${hello}, תמימה</span><span class="t-date">${longDay(todayIso())}</span></header>
+        ${page === 'calendar' ? '' : `<header class="t-head"><span class="t-hello">${hello}, תמימה</span><span class="t-date">${longDay(todayIso())}</span></header>`}
         <main id="main" tabindex="-1" class="wrap${page === 'calendar' ? ' wide' : ''}">${body}</main>
       </div></div>`;
   }
@@ -215,9 +215,22 @@
       </div>`));
     S.students.filter(s => s.leave && !s.leave.seen && s.active !== false).forEach(s => items.push(`
       <div class="todo">
-        <div class="todo-main">${chip('הודעת עזיבה', 'requested')}<b>${esc(s.name)}</b><small>${group(s.groupId).name} · תאריך הסיום ${fullDate(s.leave.endDate)}${s.leave.source === 'outside' ? ' · התקבלה מחוץ לאפליקציה' : ' · עם חתימה'}</small></div>
+        <div class="todo-main">${chip('הודעת עזיבה', 'requested')}<b>${esc(s.name)}</b><small>${group(s.groupId).name} · תאריך הסיום ${fullDate(s.leave.endDate)}${s.leave.source === 'outside' ? ' · התקבלה מחוץ לאפליקציה' : ' · עם אישור'}</small></div>
         <div class="btn-row"><a class="btn small primary" href="#/tamima/student/${s.id}">לכרטיס</a><button class="btn small ghost" data-act="leaveSeen" data-id="${s.id}">ראיתי</button></div>
       </div>`));
+    S.workshops.filter(w => w.lateRequest && w.lateRequest.status === 'open' && isLive(w)).forEach(w => items.push(`
+      <div class="todo">
+        <div class="todo-main">${chip('פנייה מאוחרת', 'requested')}<b>${esc(w.customer.name)}</b><small>ביטול ${shortDay(w.date)} ${w.time} · <span dir="ltr">${esc(w.customer.phone)}</span> · בוואטסאפ</small></div>
+        <div class="btn-row"><button class="btn small primary" data-act="lateOpen" data-id="${w.id}">להחלטה</button><button class="btn small ghost" data-act="lateSeen" data-id="${w.id}">טופל</button></div>
+      </div>`));
+    (S.privacyRequests || []).filter(r => r.status === 'open').forEach(r => {
+      const who = r.targetKind === 'student' ? student(r.targetId) : customer(r.targetId);
+      items.push(`
+      <div class="todo">
+        <div class="todo-main">${chip('בקשת פרטיות', 'overdue')}<b>${esc(who ? who.name : '')}</b><small>${r.type} · ${fullDate(r.at)}${r.note ? ` · ${esc(r.note)}` : ''} · לטפל תוך 30 יום</small></div>
+        <div class="btn-row">${r.type === 'מחיקה' ? `<button class="btn small primary" data-act="anonAsk" data-kind="${r.targetKind}" data-id="${r.targetId}">לאנונימיזציה</button>` : r.targetKind === 'student' ? `<a class="btn small primary" href="#/tamima/student/${r.targetId}">לפרטים</a>` : ''}<button class="btn small ghost" data-act="privacyDone" data-id="${r.id}">סומן כטופל</button></div>
+      </div>`);
+    });
     openRefundCases().forEach(x => {
       const info = invoiceInfo(x.inv);
       items.push(`
@@ -371,6 +384,16 @@
     return free.concat(others);
   }
 
+  const CAL_SHOW = { all: 'הכל', activity: 'פעילות', open: 'פתוח למכירה' };
+  // חלון הבחירה: מה מוסיפים ליומן, עם הסבר קצר לכל אפשרות
+  function addChooserHtml(date, time) {
+    const at = date ? ` data-date="${date}"${time ? ` data-t="${time}"` : ''}` : '';
+    return `<h2>מה מוסיפים ליומן?</h2>${date ? `<p class="muted">${longDay(date)}${time ? `, ${time}` : ''}</p>` : ''}
+      <div class="choice-list">
+        <button class="choice" data-act="addSlot"${at}><b>מועד למכירה</b><small>זמן פנוי שלקוחות יוכלו להזמין, באתר או בערוץ שיווק.</small></button>
+        <button class="choice" data-act="evNew"${at}><b>אירוע שלי</b><small>זמן פרטי ביומן. אף אחד לא יוכל להזמין אותו. אפשר עם חזרה.</small></button>
+      </div>`;
+  }
   function tCalendar() {
     const T = todayIso();
     const days = calDays();
@@ -427,7 +450,7 @@
           <button class="x-btn pop-x" data-act="popClose" aria-label="סגירה">×</button>
           <b>${shortDay(date)} · ${ui.pop.time} עד ${endOf(ui.pop.time)}</b>
           <div class="pop-ch" role="radiogroup" aria-label="ערוץ">${G.channels.active().map(ch => `<button role="radio" aria-checked="${ui.pop.ch === ch.id}" class="${ui.pop.ch === ch.id ? 'on' : ''}" data-act="popCh" data-ch="${ch.id}">${esc(chLabel(ch))}</button>`).join('')}</div>
-          <div class="pop-act"><button class="btn primary small" data-act="popOpen">פתיחה</button><button class="btn ghost small" data-act="popBlock">חסימה</button></div>
+          <div class="pop-act"><button class="btn primary small" data-act="popOpen">מועד למכירה</button><button class="btn ghost small" data-act="popEvent">אירוע שלי</button></div>
         </div>`;
       }
       const nowLine = date === T && nowMin > GRID_FROM && nowMin < GRID_TO ? `<div class="cg-now" style="top:${px(nowMin)}px"></div>` : '';
@@ -463,13 +486,12 @@
           <h1 class="cal-title">${title}</h1>
         </div>
         <div class="cal-tools">
-          <div class="seg" role="radiogroup" aria-label="סינון">${[['all', 'הכל'], ['activity', 'פעילות'], ['open', 'פתוח למכירה']].map(([k, l]) => `<button role="radio" aria-checked="${f === k}" class="${f === k ? 'on' : ''}" data-act="calFilter" data-f="${k}">${l}</button>`).join('')}</div>
-          ${bulk ? '' : '<button class="btn ghost small" data-act="evNew">+ אירוע</button><button class="btn primary small" data-act="newSlotForm">+ מועד</button>'}
+          <button class="btn ghost small" data-act="calShow" aria-haspopup="dialog">הצגה: ${CAL_SHOW[f]}</button>
+          ${bulk ? '' : '<button class="btn primary small cal-add" data-act="addChooser" aria-haspopup="dialog">+ הוספה</button>'}
         </div>
       </div>
-      ${mobile ? `<p class="cal-day-sum">${daySummary(days[0])}</p>` : ''}
       <div class="cal-sub">
-        <div class="cs">${gsPill()}${summary}${pendN ? `<span class="cs-pend">${pendN} ממתינים לאתר</span>` : ''}</div>
+        <div class="cs">${mobile ? `<span class="cal-day-sum">${daySummary(days[0])}</span>` : ''}${gsPill()}${summary}${pendN ? `<span class="cs-pend">${pendN} ממתינים לאתר</span>` : ''}</div>
       </div>
       ${ui.calMsg ? `<p class="cal-msg" role="status"><span>${esc(ui.calMsg)}</span><button class="x-btn" data-act="calMsgClose" aria-label="סגירת ההודעה">×</button></p>` : ''}
       <div class="cg ${mobile ? 'one' : ''}${bulk ? ' bulk' : ''}" style="--h:${H}px;--cols:${days.length}">
@@ -480,6 +502,8 @@
         </div>
       </div>
       ${bulkBar}
+      <ul class="cal-legend" aria-label="מקרא"><li><span class="lg k-class" aria-hidden="true"></span>שיעור</li><li><span class="lg k-ws" aria-hidden="true"></span>סדנה</li><li><span class="lg k-open" aria-hidden="true"></span>פתוח למכירה</li><li><span class="lg k-hold" aria-hidden="true"></span>בתהליך הזמנה</li><li><span class="lg k-na" aria-hidden="true"></span>לא זמין או אירוע</li></ul>
+      ${bulk ? '' : '<button class="cal-fab" data-act="addChooser" aria-haspopup="dialog" aria-label="הוספה ליומן">+</button>'}
     </div>`;
   }
 
@@ -737,7 +761,9 @@
       S.lessons.filter(l => l.groupId === s.groupId && lStart(l) > now()).forEach(l => { delete att(l.id).rec[s.id]; });
       email('groupMoved', toStudent(s), `עברת ל${g.name}`, [`היי ${first(s)},`, `מעכשיו השיעורים שלך ביום ${DAYS[g.day]}, ${g.start} עד ${g.end}.`]);
     }
+    const changed = [['שם', s.name, name], ['טלפון', s.phone, f.phone.trim()], ['מייל', s.email || '', (f.email || '').trim()], ['קבוצה', s.groupId, g.id]].filter(x => x[1] !== x[2]).map(x => x[0]);
     Object.assign(s, { name, phone: f.phone.trim(), email: (f.email || '').trim(), groupId: g.id, notes: f.notes || '' });
+    if (changed.length) audit(`שינוי פרטים: ${changed.join(', ')}`, 'תמימה', name);
     return ['', '', s.id];
   }
   function setStudentActive(id, on) {
@@ -763,7 +789,9 @@
     if (!EMAIL_OK(f.email)) return ['email', 'כתובת המייל לא תקינה.'];
     if (!(n >= 1 && n <= 12)) return ['n', 'מספר המשתתפים צריך להיות בין 1 ל-12.'];
     if (!(amount >= 0)) return ['amount', 'נא למלא סכום.'];
+    const changed = [['שם', w.customer.name, f.name.trim()], ['טלפון', w.customer.phone, (f.phone || '').trim()], ['מייל', w.customer.email, (f.email || '').trim()]].filter(x => x[1] !== x[2]).map(x => x[0]);
     Object.assign(w.customer, { name: f.name.trim(), phone: (f.phone || '').trim(), email: (f.email || '').trim() });
+    if (changed.length) audit(`שינוי פרטי לקוח: ${changed.join(', ')}`, 'תמימה', w.customer.name);
     // סכום שלא שונה ידנית מחושב מחדש לפי המחירון כשמספר המשתתפים משתנה
     w.amount = n !== w.n && amount === w.amount && w.amount === price(w.n) ? price(n) : amount;
     w.n = n;
@@ -868,7 +896,7 @@
     return card(`<h2>הודעת עזיבה</h2>
       <dl class="kv"><dt>התקבלה ב</dt><dd>${fullDate(L.noticeDate)}${L.source === 'outside' ? ' · התקבלה מחוץ לאפליקציה' : ''}</dd>
         ${L.name ? `<dt>שם</dt><dd>${esc(L.name)}</dd>` : ''}<dt>תאריך הסיום</dt><dd><b>${longDay(L.endDate)}</b></dd><dt>גרסת מדיניות</dt><dd>${esc(L.version)}</dd></dl>
-      ${L.sig ? `<img class="sig-img" src="${esc(L.sig)}" alt="החתימה של ${esc(L.name || s.name)}">` : ''}
+      ${L.confirmedAt ? `<p class="ok-line">✓ אושר ב-${dateTime(L.confirmedAt)}</p>` : ''}
       <label class="field"><span>שינוי תאריך הסיום</span><input type="date" data-bind="ld.date" data-rerender="page" value="${esc(ui.ld.date)}"></label>
       ${ui.ld.date && ui.ld.date < min ? `<p class="policy warn">התאריך מוקדם מהמדיניות (לפיה: ${longDay(min)}). אפשר לשמור בכל זאת.</p>` : ''}
       ${ui.ld.date && ui.ld.date !== L.endDate ? `<button class="btn ghost small" data-act="stuLeaveDate" data-id="${s.id}">שמירת תאריך הסיום</button>` : ''}
@@ -909,7 +937,7 @@
         </div>
         <div class="btn-row"><button class="btn primary small" data-act="stuEdit" data-id="${s.id}">עריכת פרטים</button>${off
           ? `<button class="btn ghost small" data-act="stuActive" data-id="${s.id}" data-on="1">החזרה לקורס</button>`
-          : `${s.leave ? '' : `<button class="btn ghost small" data-act="stuLeaveOutside" data-id="${s.id}">התקבלה הודעת עזיבה</button>`}<button class="btn ghost small" data-act="stuStopAsk" data-id="${s.id}">הסטודיו מפסיק את ההשתתפות</button>`}</div>
+          : `${s.leave ? '' : `<button class="btn ghost small" data-act="stuLeaveOutside" data-id="${s.id}">התקבלה הודעת עזיבה</button>`}<button class="btn ghost small" data-act="stuStopAsk" data-id="${s.id}">הסטודיו מפסיק את ההשתתפות</button>`}${s.anonymizedAt ? '' : `<button class="btn ghost small" data-act="anonAsk" data-kind="student" data-id="${s.id}">אנונימיזציה</button>`}</div>
       </section>
       <div class="stu-grid">
         ${s.leave ? leaveCardHtml(s) : ''}
@@ -1462,13 +1490,15 @@
     return `<h2>${esc(c.name)}</h2><p class="muted">לקוח מאז ${dmy(c.since)}.${parse(c.since).getFullYear()}</p>
       ${twins.map(o => twinRow(c, o)).join('')}
       <dl class="kv"><dt>טלפון</dt><dd dir="ltr">${c.phones.map(fmtPhone).join(', ') || 'לא נמסר'}</dd><dt>מייל</dt><dd dir="ltr">${esc(c.email || 'לא נמסר')}</dd>
+        <dt>דיוור</dt><dd>${c.marketing ? `מסכים מ-${fullDate(c.marketingAt)}` : 'לא'}</dd>
         <dt>הזזה חד פעמית</dt><dd>${c.lateMoveUsed ? `נוצלה (${dmy(c.lateMoveUsed)}.${parse(c.lateMoveUsed).getFullYear()})` : 'זמינה'}</dd>
         ${stu ? `<dt>סטודנט</dt><dd><a href="#/tamima/student/${stu.id}" data-act="closeSheet">${esc(stu.name)}, ${esc(group(stu.groupId).name)}</a></dd>` : ''}</dl>
       <h3>הזמנות</h3>${ws.map(w => `<button class="ws-row" data-act="wsSheet" data-id="${w.id}"><span class="dot dot-${srcCss(w)}"></span>
         <div><b>${longDay(w.date)}, ${w.time}</b><small>${w.n} משתתפים · ${money(w.amount)} · ${isOwn(w) ? 'מהאתר' : esc(chName(w.source))}</small></div>${w.status === 'cancelled' ? chip('בוטלה', 'muted') : ''}</button>`).join('') || empty('אין הזמנות.')}
       <h3>חשבוניות</h3>${inv.map(w => `<div class="pay-row"><span>חשבונית מס קבלה מס׳ ${w.invoice} · ${money(w.amount)} · ${shortDay(w.date)}</span>
         <div class="btn-row">${pdfBtn(w.invoice)}${isOwn(w) && refundable(w.invoice) ? `<button class="btn ghost small" data-act="refundOpen" data-inv="${w.invoice}">זיכוי</button>` : ''}</div>${refundLines(w.invoice)}</div>`).join('') || empty('אין חשבוניות עדיין.')}
-      ${(S.customers || []).length > 1 ? `<button class="btn ghost block" data-act="custMergePick" data-id="${c.id}">איחוד עם לקוח אחר</button>` : ''}`;
+      ${(S.customers || []).length > 1 && !c.anonymizedAt ? `<button class="btn ghost block" data-act="custMergePick" data-id="${c.id}">איחוד עם לקוח אחר</button>` : ''}
+      ${c.anonymizedAt ? '' : `<button class="btn ghost block" data-act="anonAsk" data-kind="customer" data-id="${c.id}">אנונימיזציה</button>`}`;
   }
   function mergePreviewHtml(keepId, dropId) {
     const k = customer(keepId), d = customer(dropId);
@@ -1513,12 +1543,14 @@
     const st = S.settings;
     const tab = ui.moreTab || 'channels';
     const num = (k, label, suffix) => `<label class="field inline"><span>${label}</span><span class="with-suffix"><input type="number" data-setting="${k}" value="${st[k]}">${suffix}</span></label>`;
-    const tabs = [['channels', 'ערוצים'], ['closed', 'ימי סגירה'], ['site', 'אתר'], ['mail', 'מיילים'], ['google', 'גוגל'], ['settings', 'מחירים']];
+    const tabs = [['channels', 'ערוצים'], ['closed', 'ימי סגירה'], ['site', 'אתר'], ['mail', 'מיילים'], ['google', 'גוגל'], ['settings', 'מחירים'], ['audit', 'יומן פעולות']];
     let body;
     if (tab === 'google') body = gcalCard();
     else if (tab === 'closed') body = closedTab();
     else if (tab === 'site') body = contentTab();
     else if (tab === 'mail') body = mailTab();
+    else if (tab === 'audit') body = card(`<h2>יומן פעולות</h2><p class="muted small">כל זיכוי, אנונימיזציה ושינוי פרטים: מה נעשה, מי, על מי ומתי. בדמו אין כניסה למערכת, ולכן "מי" הוא התפקיד.</p>
+      ${(S.audit || []).length ? `<div class="actlog-wrap"><table class="actlog"><thead><tr><th scope="col">מתי</th><th scope="col">פעולה</th><th scope="col">מי</th><th scope="col">על מי</th></tr></thead><tbody>${S.audit.map(x => `<tr><td data-l="מתי">${dateTime(x.at)}</td><td data-l="פעולה">${esc(x.action)}</td><td data-l="מי">${esc(x.who)}</td><td data-l="על מי">${esc(x.target)}</td></tr>`).join('')}</tbody></table></div>` : empty('עדיין אין פעולות ביומן.')}`);
     else if (tab === 'settings') {
       body = card(`<h2>מחירון</h2>${num('price2', 'סדנה לזוג', '₪')}${num('pricePer', 'סדנה, 3 עד 6, למשתתף', '₪')}${num('cardPrice', 'כרטיסייה, 4 שיעורים', '₪')}`)
         + card(`<h2>מדיניות ביטול</h2>${num('workshopCancelHours', 'סדנה: ביטול עד', 'שעות לפני')}${num('stopParticipationFee', 'הפסקת השתתפות ביוזמת הסטודיו: ניכוי', '₪')}
@@ -1720,7 +1752,7 @@
     },
     calPersonal(d) {
       openSheet(() => `<h2>תפוס ביומן האישי</h2><p class="muted">${longDay(d.date)}, ${fromMin(+d.s)} עד ${fromMin(+d.e)}</p>
-        <p class="small">המערכת קוראת מהיומן האישי רק "תפוס או פנוי" (freebusy), בלי כותרת ובלי פרטים. הזמן הזה לא מוצע באף ערוץ.</p>`);
+        <p class="small">המערכת קוראת מהיומן האישי רק "תפוס או פנוי", בלי כותרת ובלי פרטים. הזמן הזה לא מוצע באף ערוץ.</p>`);
     },
     // אירוע ביומן (גם חסימה ישנה): פרטים, ומחיקה או עריכה של מופע אחד או של כל הסדרה
     calBlock(d) {
@@ -1921,6 +1953,13 @@
     popClose() { ui.pop = null; render(); },
     popOpen() { const p = ui.pop; ui.pop = null; openWithUndo(p.date, p.time, p.ch); },
     popBlock() { const p = ui.pop; ui.pop = null; blockWithUndo(p.date, p.time); },
+    popEvent() { const p = ui.pop; ui.pop = null; render(); A.evNew({ date: p.date, t: p.time }); },
+    addChooser(d) { openSheet(() => addChooserHtml(d && d.date, d && d.t)); },
+    addSlot(d) { closeSheet(); A.newSlotForm(); if (d && d.date && ui.nsf) { ui.nsf.date = d.date; if (d.t) ui.nsf.time = d.t; renderSheet(); } },
+    calShow() {
+      openSheet(() => `<h2>מה להציג ביומן</h2><div class="choice-list">${[['all', 'הכל', 'שיעורים, סדנאות, אירועים ומועדים פתוחים.'], ['activity', 'פעילות', 'רק מה שקורה בפועל: שיעורים, סדנאות ואירועים.'], ['open', 'פתוח למכירה', 'רק מועדים פנויים שאפשר להזמין, ומה שחוסם אותם.']].map(([k, l, x]) => `<button class="choice${ui.calFilter === k ? ' on' : ''}" data-act="calFilterPick" data-f="${k}" aria-pressed="${ui.calFilter === k}"><b>${l}</b><small>${x}</small></button>`).join('')}</div>`);
+    },
+    calFilterPick(d) { ui.calFilter = d.f; closeSheet(); render(); },
 
     // פתיחת מועדים מרובה לערוץ (י-15)
     bulkOn() { if (ui.sheet) closeSheet(); ui.bulk = { on: true, ch: (G.channels.active().find(c => !c.home) || { id: HOME }).id, sel: [] }; ui.pop = null; ui.calFilter = 'all'; render(); },
@@ -2228,6 +2267,7 @@
         if (f.late) {
           const w = workshop(f.id), cu = customerOf(w);
           if (cu) cu.lateMoveUsed = todayIso();
+          if (w.lateRequest) w.lateRequest.status = 'done';
           const x = typeof f.late === 'string' && refundCase(f.late);
           if (x) x.status = 'moved';
           log('notify', `הזזה חד פעמית: ${w.customer.name}`, `נרשם בכרטיס הלקוח (${dmy(todayIso())}). החשבונית נשארת, ולא נפתח זיכוי.`);
@@ -2257,6 +2297,13 @@
     },
     refundOpen(d) { openRefund(Number(d.inv)); },
     caseOpen(d) { openCaseSheet(d.id); },
+    lateSeen(d) { const w = workshop(d.id); w.lateRequest.status = 'done'; render(); snack('סומן כטופל.', () => { w.lateRequest.status = 'open'; render(); }); },
+    privacyDone(d) { const r = S.privacyRequests.find(x => x.id === d.id); r.status = 'done'; r.doneAt = todayIso(); render(); snack('הבקשה סומנה כטופלה.', () => { r.status = 'open'; render(); }); },
+    anonAsk(d) {
+      const who = d.kind === 'student' ? student(d.id) : customer(d.id);
+      openSheet(confirmHtml(`אנונימיזציה של ${esc(who.name)}?`, 'נמחקים השם, הטלפון והמייל, גם מההיסטוריה ומהמיילים. הקבלות, הסכומים והתאריכים נשמרים, כי חובה לשמור אותם לפי חוק. אי אפשר לבטל את הפעולה.', 'anonDo', `data-kind="${d.kind}" data-id="${d.id}"`, 'אנונימיזציה'));
+    },
+    anonDo(d) { anonymize(d.kind, d.id, 'תמימה'); closeSheet(); render(); snack('האנונימיזציה בוצעה. הקבלות נשמרו.'); },
     // פנייה מאוחרת (הלקוח פנה בוואטסאפ): מוצע 0 ₪, ומוצגת גם הזזה חד פעמית
     lateOpen(d) {
       const w = workshop(d.id);
@@ -2283,6 +2330,7 @@
       if (!res.ok) {
         if (!x) x = openRefundCase({ inv: f.inv, reason: f.reason, wsId: f.wsId, studentId: f.studentId, suggested: f.suggested, why: f.why, info: f.info, late: f.late });
         Object.assign(x, { status: 'failed', error: res.error, amountTried: amt });
+        audit(`זיכוי נכשל (${money(amt)})`, 'תמימה', info.name);
         f.caseId = x.id;
         log('sumit', 'סאמיט: הזיכוי נכשל', res.error);
         email('refundFailed', toStudio(), `הזיכוי ל${info.name} לא בוצע`, ['שלום תמימה,', `הזיכוי של ${money(amt)} לחשבונית מס׳ ${f.inv} לא בוצע.`, res.error, 'הזיכוי מסומן "דורש טיפול" בבית.'], { cta: ['לטיפול', siteUrl('#/tamima/home')] });
@@ -2293,6 +2341,8 @@
       const r = { id: uid('rf'), invoice: f.inv, amount: amt, date: todayIso(), creditNo: res.creditNo, reason: f.reason || 'manual' };
       S.refunds.push(r);
       if (x) Object.assign(x, { status: 'done', refundId: r.id });
+      audit(`זיכוי ${money(amt)} לחשבונית ${f.inv}`, 'תמימה', info.name);
+      if (f.late && f.wsId && workshop(f.wsId).lateRequest) workshop(f.wsId).lateRequest.status = 'done';
       log('sumit', 'סאמיט: הזיכוי בוצע', `${info.name}, ${money(amt)}. ההחזר יצא לכרטיס האשראי, והופקה חשבונית מס קבלה זיכוי מס׳ ${r.creditNo}.`);
       const w = f.wsId && workshop(f.wsId);
       if (w) { if (w.status !== 'cancelled') dropWorkshop(w); wsCancelMail(w, r); }
@@ -2305,6 +2355,7 @@
     refundSkip() {
       const f = ui.rf, x = f.caseId && refundCase(f.caseId);
       if (x) x.status = 'none';
+      if (f.late && f.wsId && workshop(f.wsId).lateRequest) workshop(f.wsId).lateRequest.status = 'done';
       const w = f.wsId && workshop(f.wsId);
       if (w) { if (w.status !== 'cancelled') dropWorkshop(w); wsCancelMail(w, null); }
       if (x || w) log('notify', 'החלטה: ללא החזר', `${invoiceInfo(f.inv).name}, חשבונית מס׳ ${f.inv}. לא נשלחה קריאה לסאמיט.`);

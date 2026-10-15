@@ -331,7 +331,7 @@
     } else if (f.mode === 'late' && !early) {
       const text = `היי תמימה, אני ${w.customer.name}, הזמנתי סדנה ב-${dmy(w.date)}.${parse(w.date).getFullYear()} בשעה ${w.time} ורוצה לבדוק אפשרות ביטול.`;
       act = `<div class="policy warn">ביטול בפחות מ-${H} שעות אינו כולל החזר. לבירור אפשרויות, דברו עם תמימה.</div>
-        <a class="btn primary block" href="${esc(waLink(text))}" target="_blank" rel="noopener">שליחת הודעה לתמימה בוואטסאפ</a>
+        ${w.lateRequest ? '<p class="ok-line" role="status">הפנייה נשלחה לתמימה. ההזמנה נשארת בתוקף עד שתמימה תחליט.</p>' : ''}<a class="btn primary block" href="${esc(waLink(text))}" target="_blank" rel="noopener" data-act="cbLateSend">שליחת הודעה לתמימה בוואטסאפ</a>
         <p class="muted small">ההזמנה נשארת בתוקף עד שתמימה תחליט.</p><button class="btn ghost block" data-act="cbMode" data-m="">חזרה</button>`;
     } else if (early) {
       act = `<p class="muted small">ביטול או שינוי מועד עד ${H} שעות לפני הסדנה. ביטול מאוחר יותר אינו כולל החזר.</p>
@@ -437,12 +437,23 @@
         email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, `חשבונית מס קבלה מס׳ ${w.invoice} מצורפת.`, `ביטול או שינוי מועד עד ${S.settings.workshopCancelHours} שעות לפני הסדנה, בקישור למטה. ביטול מאוחר יותר אינו כולל החזר.`, 'נתראה, תמימה'], { extra: receiptMailHtml(w.invoice, w.customer.name, wsDesc(w), w.amount, w.paidAt), cta: ['לניהול ההזמנה', bookingUrl(w)] });
         email('newBooking', toStudio(), `הזמנה חדשה: ${w.customer.name}, ${shortDay(w.date)} ${w.time}`, [`${w.customer.name}: הזמנת סדנה מהאתר.`, `${longDay(w.date)}, ${w.time} · ${w.n} משתתפים · ${money(w.amount)}.`, `טלפון: ${w.customer.phone}`], { cta: ['לסדנאות', siteUrl('#/tamima/workshops')] });
         log('notify', 'הזמנה חדשה נכנסה לדשבורד', `סדנה מהאתר, ${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}.`);
+        // הסכמה לדיוור: נשמרת בכרטיס הלקוח עם התאריך
+        if (bk.marketing) { const cu = customerOf(w); if (cu) Object.assign(cu, { marketing: true, marketingAt: todayIso() }); }
         bk.done = w.id; bk.step = 'done';
         render(); scrollTop();
         toast('הזמנה חדשה מהאתר', `${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}`);
       }, 1200);
     },
     // ההזמנה שלי
+    cbLateSend() {
+      const w = workshop(ui.cb.id);
+      if (!w || (w.lateRequest && w.lateRequest.status === 'open')) return;
+      w.lateRequest = { at: new Date().toISOString(), status: 'open' };
+      email('lateRequest', toStudio(), `פנייה מאוחרת: ${w.customer.name}`, ['שלום תמימה,', `פנייה בוואטסאפ מ${w.customer.name} לגבי ביטול הסדנה ב${longDay(w.date)}, ${w.time}.`, `טלפון: ${w.customer.phone}`, 'ההזמנה בתוקף עד ההחלטה שלך.'], { cta: ['להחלטה', siteUrl('#/tamima/home')] });
+      log('notify', `פנייה מאוחרת: ${w.customer.name}`, `${shortDay(w.date)} ${w.time}. מופיעה ב"ממתין לך עכשיו", עם 0 ₪ מוצע והזזה חד פעמית.`);
+      toast('פנייה מאוחרת לביטול', `${w.customer.name}, ${shortDay(w.date)} ${w.time}`);
+      render();
+    },
     cbMode(d) { ui.cb.mode = d.m; ui.cb.msg = ''; ui.cb.date = null; ui.cb.time = null; render(); },
     cbDate(d) { ui.cb.date = d.date; ui.cb.time = null; render(); },
     cbTime(d) { ui.cb.time = d.t; render(); },
@@ -488,7 +499,7 @@
       else if (!lead.email.trim() || !EMAIL_OK(lead.email)) { lead.err = 'נא למלא כתובת מייל תקינה, למשל name@example.com.'; lead.errField = 'email'; }
       else {
         lead.err = ''; lead.sent = true;
-        S.leads.push({ id: uid('ld'), name: lead.name.trim(), phone: lead.phone.trim(), email: lead.email.trim(), group: lead.group, handled: false, status: 'new', at: todayIso() });
+        S.leads.push({ id: uid('ld'), name: lead.name.trim(), phone: lead.phone.trim(), email: lead.email.trim(), group: lead.group, handled: false, status: 'new', at: todayIso(), marketing: !!lead.marketing, marketingAt: lead.marketing ? todayIso() : '' });
         email('newLead', toStudio(), `פנייה חדשה לקורס: ${lead.name.trim()}`, [`${lead.name.trim()}: פרטים הושארו באתר.`, `טלפון: ${lead.phone.trim()}`, `מייל: ${lead.email.trim()}`, lead.group ? `קבוצה מועדפת: ${group(lead.group).name}.` : 'כל קבוצה מתאימה.'], { cta: ['לבית', siteUrl('#/tamima/home')] });
         toast('פנייה חדשה לקורס', `${lead.name.trim()}, ${lead.phone.trim()}`);
       }

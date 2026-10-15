@@ -69,36 +69,16 @@
       <dl class="kv"><dt>נשלחה ב</dt><dd>${fullDate(s.leave.noticeDate)}</dd><dt>תאריך הסיום</dt><dd>${longDay(s.leave.endDate)}</dd></dl>
       <p class="muted small">עד תאריך הסיום הכל ממשיך כרגיל: השיעורים, ההשלמות והתשלומים.</p>`)}`;
     const e = leaveEndDate(s);
-    const f = ui.lv || (ui.lv = { name: '', sig: '', err: '', errField: '' });
+    const f = ui.lv || (ui.lv = { name: '', ok: false, err: '', errField: '' });
     return `<a class="back" href="#/student/home">חזרה</a><h1>סיום הקורס</h1>
       ${card(`<div class="policy"><b>מתוך המדיניות</b>${LEAVE_CLAUSE}</div>
         <dl class="kv"><dt>תאריך הסיום</dt><dd><b>${longDay(e.date)}</b></dd><dt>שיעורים עד הסיום</dt><dd>${lessonsUntil(s, e.date)}</dd></dl>
         <p class="muted small">${e.early ? 'שלושה חודשים מתחילת הקורס עוד לא עברו, ולכן זה תאריך הסיום המוקדם האפשרי.' : 'חודש מהיום, לפי המדיניות.'} עד תאריך הסיום הכל ממשיך כרגיל.</p>
         <label class="field"><span>שם מלא</span><input data-bind="lv.name" value="${esc(f.name)}" autocomplete="name" ${f.errField === 'name' ? 'aria-invalid="true" aria-describedby="lv-err"' : ''}></label>
-        <div class="field"><span id="sig-l">חתימה <small class="hint-inline">באצבע או בעכבר</small></span><canvas id="sig" class="sig-pad" role="img" aria-labelledby="sig-l"></canvas>
-          <button class="linkish small" data-act="sigClear">ניקוי החתימה</button></div>
+        <label class="consent"><input type="checkbox" data-bind="lv.ok" ${f.ok ? 'checked' : ''} ${f.errField === 'ok' ? 'aria-invalid="true" aria-describedby="lv-err"' : ''}><span>אני מאשר/ת את סיום הקורס</span></label>
         ${f.err ? `<p class="err" id="lv-err" role="alert">${esc(f.err)}</p>` : ''}
         <button class="btn primary block" data-act="stuLeaveSend">שליחת הודעת עזיבה</button>`)}`;
   }
-  // משטח החתימה: ציור באצבע או בעכבר. החתימה נשמרת כתמונה
-  function initSignature() {
-    const c = document.getElementById('sig');
-    if (!c || c.dataset.ready) return;
-    c.dataset.ready = '1';
-    const ctx = c.getContext('2d');
-    const r0 = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-    c.width = Math.max(1, r0.width * dpr); c.height = Math.max(1, r0.height * dpr);
-    ctx.scale(dpr, dpr); ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#2a231d';
-    if (ui.lv && ui.lv.sig) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0, r0.width, r0.height); img.src = ui.lv.sig; }
-    let down = false;
-    const pos = e => { const r = c.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-    c.addEventListener('pointerdown', e => { down = true; try { c.setPointerCapture(e.pointerId); } catch (err) { /* דפדפן ישן */ } const [x, y] = pos(e); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 0.1, y + 0.1); ctx.stroke(); });
-    c.addEventListener('pointermove', e => { if (!down) return; const [x, y] = pos(e); ctx.lineTo(x, y); ctx.stroke(); });
-    const end = () => { if (!down) return; down = false; ui.lv.sig = c.toDataURL('image/png'); };
-    c.addEventListener('pointerup', end);
-    c.addEventListener('pointercancel', end);
-  }
-
   function sHome() {
     const s = me();
     const up = studentUpcoming(s).filter(x => !x.l.cancelled && (x.kind === 'makeup' || !x.st));
@@ -159,7 +139,19 @@
       ${card(`<h2>היסטוריה</h2>${hist.map(p => `<button class="ws-row" data-act="stuInvoice" data-id="${p.id}"><span class="dot dot-paid"></span>
         <div><b>כרטיסייה, 4 שיעורים</b><small>${dmy(p.date)}.${parse(p.date).getFullYear()} · ${money(p.amount)}</small></div><span class="go">חשבונית מס קבלה</span></button>${pdfBtn(p.invoice)}${refundLines(p.invoice)}`).join('') || empty('אין תשלומים עדיין.')}`)}
       ${card(`<h2>מדיניות ביטולים</h2>${s.policy ? `<p class="ok-line">✓ אישרת ב-${fullDate(s.policy.date)}</p>` : '<p>עוד לא אישרת את המדיניות.</p>'}<a class="btn ghost block" href="#/student/policy">${s.policy ? 'למדיניות' : 'לקריאה ואישור'}</a>`)}
+      ${privacyCard(s)}
       <p class="muted small">התשלום מתבצע בכרטיס אשראי, בקישור מאובטח של סאמיט.</p>`;
+  }
+  function privacyCard(s) {
+    const open = (S.privacyRequests || []).find(r => r.targetKind === 'student' && r.targetId === s.id && r.status === 'open');
+    const f = ui.pr;
+    if (open) return card(`<h2>הפרטיות שלך</h2><p class="ok-line">✓ הבקשה ל${open.type} נשלחה ב-${fullDate(open.at)}. תמימה תחזור אליך.</p>`);
+    if (!f) return card(`<h2>הפרטיות שלך</h2><p class="muted small">אפשר לבקש לראות את הפרטים שנשמרו עליך, או למחוק אותם. הקבלות נשמרות לפי חוק.</p><button class="btn ghost block" data-act="stuPrivacyOpen">בקשה לעיון או מחיקה</button>`);
+    return card(`<h2>בקשה לעיון או מחיקה</h2>
+      <fieldset class="fs"><legend>מה מבקשים?</legend>${[['עיון', 'לראות את הפרטים שנשמרו'], ['מחיקה', 'למחוק את השם, הטלפון והמייל']].map(([v, l]) => `<label class="radio-row"><input type="radio" name="pr-type" value="${v}" data-bind="pr.type" ${f.type === v ? 'checked' : ''}><span><b>${v}</b> <small class="muted">${l}</small></span></label>`).join('')}</fieldset>
+      <label class="field"><span>הערה <small class="hint-inline">לא חובה</small></span><textarea data-bind="pr.note" rows="2" maxlength="300">${esc(f.note || '')}</textarea></label>
+      ${f.err ? `<p class="err" role="alert">${esc(f.err)}</p>` : ''}
+      <button class="btn primary block" data-act="stuPrivacySend">שליחת הבקשה</button><button class="btn ghost block" data-act="stuPrivacyCancel">ביטול</button>`);
   }
 
   function sPay() {
@@ -251,20 +243,32 @@
       log('notify', `${s.name}: המדיניות אושרה`, `גרסה ${s.policy.version}, ${fullDate(s.policy.date)}.`);
       ui.stuMsg = 'המדיניות אושרה. תודה!'; location.hash = '#/student/payments'; flashClear();
     },
-    sigClear() { if (ui.lv) ui.lv.sig = ''; render(); },
-    // הודעת עזיבה: בלי שם וחתימה אין שליחה
+    // הודעת עזיבה: בלי שם ובלי סימון האישור אין שליחה
     stuLeaveSend() {
       const s = me(), f = ui.lv;
       f.err = ''; f.errField = '';
       if (String(f.name || '').trim().length < 2) { f.err = 'נא לכתוב שם מלא.'; f.errField = 'name'; ui.focusSel = '[data-bind="lv.name"]'; render(); return; }
-      if (!f.sig) { f.err = 'נא לחתום במשטח החתימה.'; render(); return; }
+      if (!f.ok) { f.err = 'נא לסמן "אני מאשר/ת את סיום הקורס".'; f.errField = 'ok'; render(); return; }
       const e = leaveEndDate(s);
-      s.leave = { noticeDate: todayIso(), endDate: e.date, minDate: e.date, name: f.name.trim(), sig: f.sig, version: S.settings.policyVersion, source: 'app', seen: false };
+      s.leave = { noticeDate: todayIso(), endDate: e.date, minDate: e.date, name: f.name.trim(), confirmedAt: new Date().toISOString(), version: S.settings.policyVersion, source: 'app', seen: false };
       leaveMailStudent(s);
-      email('leaveAlert', toStudio(), `הודעת עזיבה: ${s.name}`, ['שלום תמימה,', `${s.name}: הודעת עזיבה נשלחה מהאפליקציה, עם חתימה.`, `תאריך הסיום: ${longDay(s.leave.endDate)}.`], { cta: ['לכרטיס הסטודנט', siteUrl(`#/tamima/student/${s.id}`)] });
-      log('notify', `הודעת עזיבה: ${s.name}`, `תאריך הסיום ${fullDate(s.leave.endDate)}. נשמרו התאריך, השם, החתימה וגרסת המדיניות.`);
+      email('leaveAlert', toStudio(), `הודעת עזיבה: ${s.name}`, ['שלום תמימה,', `${s.name}: הודעת עזיבה נשלחה מהאפליקציה, עם אישור.`, `תאריך הסיום: ${longDay(s.leave.endDate)}.`], { cta: ['לכרטיס הסטודנט', siteUrl(`#/tamima/student/${s.id}`)] });
+      log('notify', `הודעת עזיבה: ${s.name}`, `תאריך הסיום ${fullDate(s.leave.endDate)}. נשמרו התאריך, השם, רגע האישור וגרסת המדיניות.`);
       toast('הודעת עזיבה', `${s.name}, סיום ב${longDay(s.leave.endDate)}`);
       ui.lv = null; ui.stuMsg = `הודעת העזיבה נשלחה. תאריך הסיום: ${longDay(s.leave.endDate)}.`; render(); flashClear();
+    },
+    stuPrivacyOpen() { ui.pr = { type: '', note: '', err: '' }; render(); },
+    stuPrivacyCancel() { ui.pr = null; render(); },
+    stuPrivacySend() {
+      const s = me(), f = ui.pr;
+      if (!f.type) { f.err = 'נא לבחור עיון או מחיקה.'; render(); return; }
+      if (!S.privacyRequests) S.privacyRequests = [];
+      S.privacyRequests.push({ id: uid('pr'), targetKind: 'student', targetId: s.id, type: f.type, note: String(f.note || '').trim(), at: todayIso(), status: 'open' });
+      email('privacyRequest', toStudio(), `בקשת ${f.type}: ${s.name}`, ['שלום תמימה,', `${s.name}: בקשה ל${f.type} של הפרטים האישיים.`, f.note ? `הערה: ${String(f.note).trim()}` : '', 'צריך לטפל בבקשה תוך 30 יום.'].filter(Boolean), { cta: ['לטיפול', siteUrl('#/tamima/home')] });
+      log('notify', `בקשת פרטיות: ${s.name}`, `${f.type}. מופיעה אצל תמימה ב"ממתין לך עכשיו".`);
+      audit(`בקשת ${f.type}`, 'סטודנט', s.name);
+      toast('בקשת פרטיות', `${s.name}: ${f.type}`);
+      ui.pr = null; ui.stuMsg = 'הבקשה נשלחה. תמימה תחזור אליך.'; render(); flashClear();
     },
     stuInvoice(d) {
       const p = S.payments.find(x => x.id === d.id);

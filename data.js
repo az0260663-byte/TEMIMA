@@ -119,10 +119,10 @@
       };
     });
 
-    // שיעורים: מהיום ו-8 שבועות קדימה, לפי יום הקבוצה (בלי היסטוריה)
+    // שיעורים: 5 שבועות אחורה ו-8 שבועות קדימה, לפי יום הקבוצה
     const lessons = [];
     groups.forEach(g => {
-      let d = today;
+      let d = addDays(today, -35);
       while (d.getDay() !== g.day) d = addDays(d, 1);
       for (; d <= addDays(today, 56); d = addDays(d, 7)) {
         lessons.push({ id: `${g.id}_${iso(d)}`, groupId: g.id, date: iso(d) });
@@ -150,7 +150,7 @@
     // תשלומים: כרטיסייה נוכחית לכל סטודנט, ועוד אחת למי שכבר שילם על הבאה
     const pays = [];
     students.forEach(s => {
-      pays.push({ studentId: s.id, date: iso(addDays(today, -(s.used * 7 + 3))) });
+      pays.push({ studentId: s.id, date: iso(addDays(today, -Math.min(s.used * 7 + 3, today.getDate() - 1))) });
       if (s.nextPaid) pays.push({ studentId: s.id, date: iso(addDays(today, -2)) });
       if (s.name === 'נועה לוי') pays.push({ studentId: s.id, date: iso(addDays(today, -45)) });
     });
@@ -271,7 +271,9 @@
       // נתוני הדגמה: פנייה חדשה לקורס מהאתר, מחכה שתמימה תחזור אליה
       leads: [{ id: 'ld1', name: 'שירה גולן', phone: '054-7781203', email: 'lead1@example.com', group: 'tue', handled: false, status: 'new', at: iso(addDays(today, -1)) }], nextInvoice: invoice, seq: 1,
       customers,        // כרטיסי לקוחות: { id, name, phones, email, sumitId, token, lateMoveUsed, studentId, since }
-      refundCases: [],  // זיכוי ממתין להחלטה: { id, inv, reason, suggested, status, wsId, studentId }
+      refundCases: [],
+      privacyRequests: [], // בקשות עיון או מחיקה מהאזור האישי
+      audit: [],        // יומן פעולות: { at, action, who, target }  // זיכוי ממתין להחלטה: { id, inv, reason, suggested, status, wsId, studentId }
       refunds: [],      // זיכויים: { invoice, amount, date, creditNo, reason }
       nextCredit: 5001  // מספור נפרד למסמכי זיכוי
     };

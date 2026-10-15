@@ -1204,9 +1204,6 @@ body.portal #demobar, body.portal #guide, body.portal .guide-handle { display: n
 .policy-box h2 { font-size: 1.05rem; margin: 0 0 8px; }
 .policy-box .doc-list { font-size: .9rem; }
 .policy-ok { margin-top: 8px; }
-/* חתימה על הודעת עזיבה */
-.sig-pad { display: block; width: 100%; height: 160px; border: 1.5px dashed var(--sand, #c9b8a3); border-radius: 14px; background: #fff; touch-action: none; cursor: crosshair; }
-.sig-img { display: block; max-width: 100%; height: 110px; object-fit: contain; border: 1px solid var(--line); border-radius: 12px; background: #fff; margin: 8px 0; }
 
 /* יומן: הזמנה בתהליך (לקוח באמצע הזמנה, המועד שמור לו) */
 .cg-ev.k-hold { background: var(--warn-soft); color: #6f4e0c; border: 1.5px dashed #b7791f; }
@@ -1215,3 +1212,43 @@ body.portal #demobar, body.portal #guide, body.portal .guide-handle { display: n
 .ev-days button { min-width: 40px; min-height: 40px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--surface); font: inherit; cursor: pointer; }
 .ev-days button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
 .ev-alts { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+
+/* ראש היומן: בחירה מוסברת, סיכום בשורה אחת, וכפתור הוספה קבוע בטלפון */
+.choice.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.cal-sub .cal-day-sum { font-weight: 700; font-size: .92rem; color: var(--ink); margin-inline-end: 6px; }
+.cal-fab { display: none; }
+@media (max-width: 720px) {
+  .cal-bar { margin: 12px 0 8px; }
+  .cal-add { display: none; }
+  .cal-fab { display: grid; place-items: center; position: fixed; inset-inline-end: 16px; bottom: calc(96px + env(safe-area-inset-bottom)); z-index: 55;
+    width: 56px; height: 56px; border-radius: 50%; border: 0; background: var(--clay); color: #fff; font-size: 1.8rem; line-height: 1; box-shadow: 0 8px 22px rgba(165, 85, 47, .35); cursor: pointer; }
+}
+
+/* פ-5: פירוט ההכנסות בבית */
+.legend-list { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 8px; }
+.legend-list li { display: flex; align-items: center; gap: 8px; }
+.legend-list li b { margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+.legend-list .fee { color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; }
+/* פ-3: מקרא היומן */
+ul.cal-legend { list-style: none; padding: 0; margin: 12px 0 0; }
+.cal-legend .lg.k-hold { background: var(--warn-soft); border: 1.5px dashed #b7791f; }
+/* יומן פעולות */
+.actlog { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.actlog th, .actlog td { text-align: start; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.actlog th { color: var(--muted); font-weight: 700; }
+/* לשוניות רבות (למשל ב"עוד"): עוברות שורה במקום להרחיב את הדף */
+.tabs { flex-wrap: wrap; border-radius: 22px; }
+.tabs button { flex: 1 1 auto; white-space: nowrap; }
+/* יומן הפעולות: הטבלה נגללת בתוך המקום שלה, והתאים עוברים שורה */
+.actlog-wrap { overflow-x: auto; max-width: 100%; }
+.actlog { table-layout: fixed; }
+.actlog td, .actlog th { overflow-wrap: anywhere; }
+@media (max-width: 720px) { .actlog { font-size: .8rem; } .actlog th:first-child, .actlog td:first-child { width: 28%; } }
+/* בטלפון: כל פעולה ביומן כרשומה אחת, בלי גלילה הצידה */
+@media (max-width: 720px) {
+  .actlog thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .actlog, .actlog tbody, .actlog tr, .actlog td { display: block; width: auto !important; }
+  .actlog tr { border-bottom: 1px solid var(--line); padding: 8px 0; }
+  .actlog td { border: 0; padding: 2px 0; }
+  .actlog td::before { content: attr(data-l) ": "; color: var(--muted); font-weight: 700; }
+}
