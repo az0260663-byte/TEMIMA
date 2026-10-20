@@ -19,3 +19,5 @@ create index if not exists records_rev on public.records (rev);
 -- אין שום הרשאה למפתח הציבורי, כך שאף אחד מבחוץ לא יכול לקרוא או לכתוב.
 alter table public.records enable row level security;
 revoke all on public.records from anon, authenticated;
+-- הרשאה מפורשת רק לשרת (המפתח הסודי), כי בפרויקט כבויה החשיפה האוטומטית של טבלאות חדשות
+grant select, insert, update, delete on public.records to service_role;

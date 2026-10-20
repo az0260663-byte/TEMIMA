@@ -59,7 +59,9 @@ function fileStore(dir) {
 function supabaseStore({ url, key, fetch = globalThis.fetch, table = 'records' }) {
   if (!url || !key) throw new Error('חסרים SUPABASE_URL או SUPABASE_SERVICE_KEY בקובץ server/.env.');
   const base = `${url.replace(/\/$/, '')}/rest/v1/${table}`;
-  const headers = extra => Object.assign({ apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, extra);
+  // מפתח סודי מהסוג החדש (sb_secret_...) נשלח רק בכותרת apikey. מפתח ישן (service_role) נשלח גם כ-Authorization
+  const legacy = /^eyJ/.test(key);
+  const headers = extra => Object.assign({ apikey: key, 'Content-Type': 'application/json' }, legacy ? { Authorization: `Bearer ${key}` } : {}, extra);
   async function call(method, query, body, extra) {
     const r = await fetch(`${base}${query}`, { method, headers: headers(extra), body: body === undefined ? undefined : JSON.stringify(body) });
     if (!r.ok) { const t = await r.text().catch(() => ''); const e = new Error(`supabase ${r.status} ${t.slice(0, 200)}`); e.status = r.status; throw e; }

@@ -131,7 +131,7 @@ const save = (cookie, changes, saveId = 'save-' + Math.random().toString(36).sli
   const sbFetch = async (url, opts = {}) => {
     sent.push({ url, opts });
     const res = (status, body) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) });
-    if (opts.headers.apikey !== 'SERVICE' || opts.headers.Authorization !== 'Bearer SERVICE') return res(401, {});
+    if (opts.headers.apikey !== 'sb_secret_TEST' || opts.headers.Authorization) return res(401, {});
     const u = new URL(url);
     if (opts.method === 'POST') { JSON.parse(opts.body).forEach(x => sb.set(`${x.coll}|${x.id}`, x)); return res(201, null); }
     let rows = [...sb.values()];
@@ -142,7 +142,10 @@ const save = (cookie, changes, saveId = 'save-' + Math.random().toString(36).sli
     if (u.searchParams.get('limit')) rows = rows.slice(0, Number(u.searchParams.get('limit')));
     return res(200, rows);
   };
-  const s = createStore({ kind: 'supabase', url: 'https://x.supabase.co', key: 'SERVICE', fetch: sbFetch });
+  const s = createStore({ kind: 'supabase', url: 'https://x.supabase.co', key: 'sb_secret_TEST', fetch: sbFetch });
+  const legacyHeaders = [];
+  await createStore({ kind: 'supabase', url: 'https://x.supabase.co', key: 'eyJLEGACY', fetch: async (u, o) => { legacyHeaders.push(o.headers); return { ok: true, status: 200, json: async () => [] }; } }).all();
+  assert(legacyHeaders[0].apikey === 'eyJLEGACY' && legacyHeaders[0].Authorization === 'Bearer eyJLEGACY', 'Supabase: גם מפתח מהסוג הישן עובד');
   const sr = await s.apply([{ coll: 'students', id: 'st9', data: { id: 'st9' } }, { coll: 'leads', id: 'l1', data: { id: 'l1' } }]);
   await s.apply([{ coll: 'leads', id: 'l1', data: null }]);
   const all = await s.all();
