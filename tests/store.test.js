@@ -133,7 +133,8 @@ const save = (cookie, changes, saveId = 'save-' + Math.random().toString(36).sli
     const res = (status, body) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) });
     if (opts.headers.apikey !== 'sb_secret_TEST' || opts.headers.Authorization) return res(401, {});
     const u = new URL(url);
-    if (opts.method === 'POST') { JSON.parse(opts.body).forEach(x => sb.set(`${x.coll}|${x.id}`, x)); return res(201, null); }
+    // כמו Supabase האמיתי: שמירה מחזירה 201 עם גוף ריק
+    if (opts.method === 'POST') { JSON.parse(opts.body).forEach(x => sb.set(`${x.coll}|${x.id}`, x)); return { ok: true, status: 201, json: async () => { throw new SyntaxError('Unexpected end of JSON input'); }, text: async () => '' }; }
     let rows = [...sb.values()];
     const rev = u.searchParams.get('rev');
     if (rev) rows = rows.filter(x => x.rev > Number(rev.slice(3)));
@@ -144,7 +145,7 @@ const save = (cookie, changes, saveId = 'save-' + Math.random().toString(36).sli
   };
   const s = createStore({ kind: 'supabase', url: 'https://x.supabase.co', key: 'sb_secret_TEST', fetch: sbFetch });
   const legacyHeaders = [];
-  await createStore({ kind: 'supabase', url: 'https://x.supabase.co', key: 'eyJLEGACY', fetch: async (u, o) => { legacyHeaders.push(o.headers); return { ok: true, status: 200, json: async () => [] }; } }).all();
+  await createStore({ kind: 'supabase', url: 'https://x.supabase.co', key: 'eyJLEGACY', fetch: async (u, o) => { legacyHeaders.push(o.headers); return { ok: true, status: 200, text: async () => '[]' }; } }).all();
   assert(legacyHeaders[0].apikey === 'eyJLEGACY' && legacyHeaders[0].Authorization === 'Bearer eyJLEGACY', 'Supabase: גם מפתח מהסוג הישן עובד');
   const sr = await s.apply([{ coll: 'students', id: 'st9', data: { id: 'st9' } }, { coll: 'leads', id: 'l1', data: { id: 'l1' } }]);
   await s.apply([{ coll: 'leads', id: 'l1', data: null }]);

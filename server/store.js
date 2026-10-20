@@ -65,7 +65,9 @@ function supabaseStore({ url, key, fetch = globalThis.fetch, table = 'records' }
   async function call(method, query, body, extra) {
     const r = await fetch(`${base}${query}`, { method, headers: headers(extra), body: body === undefined ? undefined : JSON.stringify(body) });
     if (!r.ok) { const t = await r.text().catch(() => ''); const e = new Error(`supabase ${r.status} ${t.slice(0, 200)}`); e.status = r.status; throw e; }
-    return r.status === 204 ? null : r.json();
+    // שמירה מחזירה תשובה ריקה (201 או 204), קריאה מחזירה רשימה
+    const text = await r.text();
+    return text ? JSON.parse(text) : null;
   }
   // הגרסה האחרונה שנשמרה, כדי שגם אחרי הפעלה מחדש של השרת המספרים ימשיכו לעלות
   let next = null;
