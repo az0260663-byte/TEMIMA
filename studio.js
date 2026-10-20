@@ -198,6 +198,7 @@
       <aside class="tside" aria-label="תפריט">
         <span class="tside-brand"><span class="logo small" aria-hidden="true">ת</span><b>הסטודיו של תמימה</b></span>
         ${nav}
+        ${typeof accountHtml === 'function' ? accountHtml('side') : ''}
       </aside>
       <div class="tmain">
         ${page === 'calendar' ? '' : `<header class="t-head"><span class="t-hello">${hello}, תמימה</span><span class="t-date">${longDay(todayIso())}</span></header>`}
@@ -1544,6 +1545,7 @@
     const tab = ui.moreTab || 'channels';
     const num = (k, label, suffix) => `<label class="field inline"><span>${label}</span><span class="with-suffix"><input type="number" data-setting="${k}" value="${st[k]}">${suffix}</span></label>`;
     const tabs = [['channels', 'ערוצים'], ['closed', 'ימי סגירה'], ['site', 'אתר'], ['mail', 'מיילים'], ['google', 'גוגל'], ['settings', 'מחירים'], ['audit', 'יומן פעולות']];
+    const account = typeof accountHtml === 'function' ? accountHtml('more') : '';
     let body;
     if (tab === 'google') body = gcalCard();
     else if (tab === 'closed') body = closedTab();
@@ -1604,7 +1606,7 @@
           <button class="btn primary" data-act="addChannel">הוספת ערוץ</button>
         </div>`);
     }
-    return `<h1>עוד</h1>
+    return `<h1>עוד</h1>${account}
       <div class="tabs" role="tablist" aria-label="הגדרות">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${tab === k}" class="${tab === k ? 'on' : ''}" data-act="moreTab" data-t="${k}">${l}</button>`).join('')}</div>
       <div role="tabpanel">${body}</div>`;
   }

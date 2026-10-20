@@ -697,7 +697,27 @@
     clearCalendar(calendarId) { const c = calendars[calendarId]; if (c) { c.events.clear(); c.ver.clear(); version++; } },
     ensureCalendar(id, summary) { if (!calendars[id]) { makeCal(id, summary); version++; } },
     dropCalendar(id) { if (calendars[id]) { delete calendars[id]; version++; } },
-    hasCalendar: id => !!calendars[id]
+    hasCalendar: id => !!calendars[id],
+    // שמירה בשרת: כל היומנים, הערוצים ותורי השחרור כנתונים פשוטים, וטעינה חזרה
+    exportAll() {
+      const cals = Object.values(calendars).filter(c => c.id !== CAL.remoteBusy).map(c => ({ id: c.id, summary: c.summary, description: c.description || '', timeZone: c.timeZone, events: [...c.events.values()].map(clone) }));
+      return clone({ calendars: cals, channels: channelList, releaseQueue, displaced, slotCfg });
+    },
+    importAll(x) {
+      if (!x || !Array.isArray(x.calendars)) return;
+      const busy = calendars[CAL.remoteBusy];
+      calendars = {};
+      version++;
+      x.calendars.forEach(c => {
+        const cal = makeCal(c.id, c.summary, c.timeZone, c.description);
+        (c.events || []).forEach(ev => { cal.events.set(ev.id, clone(ev)); cal.ver.set(ev.id, version); });
+      });
+      if (busy) calendars[CAL.remoteBusy] = busy;
+      channelList = clone(x.channels || defaultChannels());
+      releaseQueue = clone(x.releaseQueue || []);
+      displaced = clone(x.displaced || []);
+      if (x.slotCfg) Object.assign(slotCfg, clone(x.slotCfg));
+    }
   };
 
   reset();

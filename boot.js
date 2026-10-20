@@ -3,6 +3,9 @@
 
   // איזה אזור מוצג, לפי הדף ולפי הכתובת. אזור שלא נטען בדף הזה לא מוצג
   function viewFor(r) {
+    // ניהול מול השרת: מסך כניסה או טעינה עד שהנתונים מוכנים
+    const gate = typeof backendScreen === 'function' ? backendScreen() : '';
+    if (gate) return gate;
     if (r.role === 'tamima' && typeof tamimaView === 'function') return tamimaView(r);
     if (r.role === 'student' && typeof studentView === 'function') return studentView(r);
     if (r.role === 'compliance' && typeof complianceView === 'function') return complianceView();
@@ -47,7 +50,8 @@
     const key = `${r.role}/${r.page}/${r.page === 'workshop' ? bk.step : r.param}`;
     const html = viewFor(r);
     const app = $('#app');
-    document.title = `${(PAGE_NAMES[`${r.role}/${r.page}`] || 'הסטודיו של תמימה').replace(': ', ' · ')} | הסטודיו של תמימה`;
+    const gated = typeof backendScreen === 'function' && backendScreen();
+    document.title = gated ? 'כניסה לניהול | הסטודיו של תמימה' : `${(PAGE_NAMES[`${r.role}/${r.page}`] || 'הסטודיו של תמימה').replace(': ', ' · ')} | הסטודיו של תמימה`;
     app.innerHTML = html;
     if (key !== lastKey && !reduceMotion) { app.classList.remove('page-enter'); void app.offsetWidth; app.classList.add('page-enter'); }
     lastKey = key;
@@ -61,6 +65,7 @@
     document.querySelectorAll('#demobar [data-role]').forEach(a => a.toggleAttribute('aria-current', a.dataset.role === r.role));
     focusPending();
     shareState();
+    if (typeof backendAfterRender === 'function') backendAfterRender();
   }
   // מיקוד אחרי רינדור: שדה עם שגיאה, או רכיב שביקשו להחזיר אליו מיקוד
   function focusPending() {
@@ -193,10 +198,12 @@
      תשלום שנעשה שם מופיע מיד אצל תמימה. האתר הציבורי (?p=site) עומד בפני עצמו ולא משתתף בשיתוף. */
   const chan = 'BroadcastChannel' in window ? new BroadcastChannel('tamima-demo') : null;
   // האתר הציבורי עומד בפני עצמו. רק קישור אישי להזמנה ("ההזמנה שלי") מקבל את הנתונים מהלשונית של הדמו
+  // ניהול מול השרת לא משתף נתונים בין לשוניות: כל לשונית טוענת ושומרת מול השרת
+  const serverOwned = () => typeof backendActive === 'function' && backendActive();
   const shares = !PORTAL || PORTAL.kind !== 'site' || !!PORTAL.b;
   let adopting = false, bcT = null, portalReady = !PORTAL || PORTAL.kind === 'studio';
   function shareState() {
-    if (!chan || !shares || adopting || !portalReady) return;
+    if (!chan || !shares || adopting || !portalReady || serverOwned()) return;
     clearTimeout(bcT);
     bcT = setTimeout(() => chan.postMessage({ t: 'state', s: JSON.stringify(S) }), 150);
   }
@@ -210,6 +217,7 @@
     try { render(); } finally { adopting = false; }
   }
   if (chan && shares) chan.onmessage = e => {
+    if (serverOwned()) return;
     const d = e.data || {};
     if (d.t === 'need' && (!PORTAL || PORTAL.kind === 'studio')) chan.postMessage({ t: 'state', s: JSON.stringify(S) });
     if (d.t === 'state') { portalReady = true; adoptState(d.s); }
@@ -225,6 +233,8 @@
     if (chan) chan.postMessage({ t: 'need' });
     setTimeout(() => { if (!portalReady) { ui.portalWait = false; render(); } }, 1500);
   }
-  runAutomations();
+  // בניהול מול השרת, האוטומציות רצות רק אחרי שהנתונים האמיתיים נטענו
+  const viaServer = typeof backendBoot === 'function' && backendBoot();
+  if (!viaServer) runAutomations();
   render();
-  setInterval(() => { runAutomations(); }, 60 * 1000);
+  setInterval(() => { if (!serverOwned() || BE.status === 'ready') runAutomations(); }, 60 * 1000);

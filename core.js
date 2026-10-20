@@ -11,7 +11,8 @@
   let S, bk, lead;
   const ui = { clsTab: 'att', stq: { q: '', old: false }, stf: {}, gf: {}, wsf: {}, mvf: {}, bf: {}, cMsg: null, gsec: {}, chOpen: {}, moreTab: 'channels', chf: { name: '', err: '' }, cf: { from: '', to: '', note: '', cancel: true, err: '' }, calDay: null, calFilter: 'all', calHi: null, bulk: { on: false, ch: 'salon', sel: [] }, pop: null, flash: [], calMsg: '', chMsg: null, guided: false, guideOpen: false, sheet: null, weekOffset: 0, lessonSel: {}, wsTab: 'upcoming', rcpt: null, stuMsg: null, toastTimer: null };
   let uidN = 1;
-  const TAB = Math.random().toString(36).slice(2, 5);
+  // מזהה ארוך ואקראי לכל לשונית, כדי ששתי לשוניות (או שני מכשירים) לא ייצרו אותו מזהה
+  const TAB = Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(36).padStart(2, '0')).join('').slice(0, 10);
   const uid = p => `${p}_n${TAB}${uidN++}`;
   // קוד אישי לקישור של סטודנט (לא ניתן לניחוש)
   const token = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(36).padStart(2, '0')).join('').slice(0, 20);

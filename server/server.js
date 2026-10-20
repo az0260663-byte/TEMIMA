@@ -5,6 +5,8 @@
  *   1. מגיש את קובצי האתר (במקום שרת התצוגה המקומי), עם כותרות אבטחה שאי אפשר להגדיר בדף עצמו.
  *   2. התחברות חד פעמית לגוגל: תמימה מאשרת פעם אחת, והשרת שומר את "המפתח הקבוע" (refresh token)
  *      מוצפן אצלו. הדפדפן מקבל ממנו כרטיס כניסה זמני (access token) בכל פעם שצריך, בלי חלון של גוגל.
+ *      ההתחברות הזו היא גם הכניסה של תמימה לניהול: רק חשבון הסטודיו מקבל עוגיית כניסה.
+ *   3. נתוני הסטודיו (api.js): טעינה ושמירה, רק אחרי כניסה. גיבוי יומי מוצפן (backup.js).
  *
  * המפתח הקבוע לא יוצא מהשרת אף פעם. הדפדפן מזוהה בעוגייה מאובטחת (httpOnly, SameSite=Strict),
  * כך שכל מכשיר מתחבר פעם אחת בלבד.
@@ -17,6 +19,9 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { createStore } = require('./store');
+const { dataRoutes } = require('./api');
+const { createBackup } = require('./backup');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -88,10 +93,10 @@ function createApp(opts = {}) {
   const cookies = req => Object.fromEntries((req.headers.cookie || '').split(';').map(c => c.trim().split('=')).filter(p => p[0]).map(([k, ...v]) => [k, decodeURIComponent(v.join('='))]));
   const COOKIE = 'tamima_sid';
   const setCookie = (sid, maxAge) => `${COOKIE}=${sid}; Path=/api; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${cfg.secureCookie ? '; Secure' : ''}`;
-  function readBody(req) {
+  function readBody(req, limit = 16 * 1024) {
     return new Promise((resolve, reject) => {
       let size = 0; const parts = [];
-      req.on('data', c => { size += c.length; if (size > 16 * 1024) { reject(new Error('too large')); req.destroy(); } else parts.push(c); });
+      req.on('data', c => { size += c.length; if (size > limit) { const e = new Error('too large'); e.tooLarge = true; reject(e); req.destroy(); } else parts.push(c); });
       req.on('end', () => { try { resolve(parts.length ? JSON.parse(Buffer.concat(parts).toString('utf8')) : {}); } catch (e) { reject(e); } });
       req.on('error', reject);
     });
@@ -102,15 +107,15 @@ function createApp(opts = {}) {
     const own = `${cfg.secureCookie ? 'https' : 'http'}://${req.headers.host}`;
     return (!origin || origin === own || cfg.origins.includes(origin)) && req.headers['x-tamima'] === '1';
   }
-  // הגבלת קצב פשוטה לכל כתובת
+  // הגבלת קצב פשוטה לכל כתובת. לנתונים מכסה נפרדת וגדולה יותר, כי הניהול שומר אחרי כל פעולה
   const hits = new Map();
-  function limited(req) {
-    const ip = req.socket.remoteAddress || '';
-    const now = Date.now(), win = hits.get(ip) || [];
+  function limited(req, bucket, max) {
+    const key = `${bucket}|${req.socket.remoteAddress || ''}`;
+    const now = Date.now(), win = hits.get(key) || [];
     const recent = win.filter(t => now - t < 60e3);
     recent.push(now);
-    hits.set(ip, recent);
-    return recent.length > 60;
+    hits.set(key, recent);
+    return recent.length > max;
   }
 
   /* ---------- גוגל ---------- */
@@ -134,7 +139,7 @@ function createApp(opts = {}) {
     'GET /api/auth/status': async req => {
       const ss = session(req);
       const s = ss ? ss.store : load();
-      return [200, { server: true, configured: !!(cfg.clientId && cfg.clientSecret), clientId: cfg.clientId, connected: !!(ss && s.google), account: ss && s.google ? s.google.account : '', scope: ss && s.google ? s.google.scope : '' }];
+      return [200, { server: true, data: true, configured: !!(cfg.clientId && cfg.clientSecret), clientId: cfg.clientId, connected: !!(ss && s.google), account: ss && s.google ? s.google.account : '', scope: ss && s.google ? s.google.scope : '' }];
     },
     // החלפת קוד ההרשאה (מהחלון של גוגל) במפתח קבוע. קורה פעם אחת בכל מכשיר
     'POST /api/auth/exchange': async (req, body) => {
@@ -199,6 +204,19 @@ function createApp(opts = {}) {
     }
   };
 
+  /* ---------- נתוני הסטודיו ---------- */
+  // מי נכנס: רק דפדפן עם עוגיית כניסה בתוקף, כשחשבון הסטודיו מחובר. אחרת null
+  function authed(req) {
+    const ss = session(req);
+    if (!ss || !ss.store.google) return null;
+    const owner = cfg.owner || ss.store.google.account;
+    return ss.store.google.account === owner ? owner : null;
+  }
+  const store = opts.store || createStore({ dir: path.join(cfg.dataDir, 'db') });
+  const backup = createBackup({ store, dir: path.join(cfg.dataDir, 'backups'), seal, open });
+  const data = dataRoutes({ store, authed });
+  Object.assign(routes, data.routes);
+
   /* ---------- קבצים סטטיים ---------- */
   const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.ico': 'image/x-icon', '.md': 'text/plain; charset=utf-8' };
   // רק קבצי האתר. תיקיית השרת, הבדיקות וקבצים נסתרים לא מוגשים אף פעם
@@ -212,26 +230,35 @@ function createApp(opts = {}) {
     fs.readFile(file, (e, d) => (e ? send(res, 404, 'Not found') : send(res, 200, d, { 'Content-Type': TYPES[path.extname(p)], 'Cache-Control': 'no-cache' })));
   }
 
-  return async function handler(req, res) {
+  async function handler(req, res) {
     const route = `${req.method} ${req.url.split('?')[0]}`;
     if (!route.includes(' /api/')) return req.method === 'GET' || req.method === 'HEAD' ? serveStatic(req, res) : send(res, 405, 'Method not allowed');
     const fn = routes[route];
     if (!fn) return send(res, 404, { error: 'not found' });
-    if (limited(req)) return send(res, 429, { error: 'יותר מדי בקשות. נסו שוב בעוד דקה.' });
-    if (req.method === 'POST' && !sameOrigin(req)) return send(res, 403, { error: 'בקשה ממקור לא מורשה.' });
+    const isData = route.includes(' /api/data');
+    if (limited(req, isData ? 'data' : 'auth', isData ? 300 : 60)) return send(res, 429, { error: 'יותר מדי בקשות. נסו שוב בעוד דקה.' });
+    // גם קריאת הנתונים מוגנת: רק מהאתר עצמו, עם הכותרת שדפדפן לא שולח לבד
+    if ((req.method === 'POST' || isData) && !sameOrigin(req)) return send(res, 403, { error: 'בקשה ממקור לא מורשה.' });
     try {
-      const body = req.method === 'POST' ? await readBody(req) : {};
-      const [status, data, headers] = await fn(req, body);
-      send(res, status, data, headers);
+      const body = req.method === 'POST' ? await readBody(req, data.bodyLimit[route]) : {};
+      const [status, out, headers] = await fn(req, body);
+      send(res, status, out, headers);
     } catch (e) {
+      if (e.tooLarge) return send(res, 413, { error: 'הבקשה גדולה מדי.' });
+      if (e instanceof SyntaxError) return send(res, 400, { error: 'בקשה לא תקינה.' });
       send(res, 500, { error: 'שגיאה בשרת.' });
     }
-  };
+  }
+  handler.store = store;
+  handler.backup = backup;
+  return handler;
 }
 
 module.exports = { createApp };
 
 if (require.main === module) {
   const port = Number(process.env.PORT) || 8123;
-  http.createServer(createApp()).listen(port, () => console.log(`הסטודיו של תמימה: http://localhost:${port}`));
+  const app = createApp();
+  app.backup.start();
+  http.createServer(app).listen(port, () => console.log(`הסטודיו של תמימה: http://localhost:${port} (נתונים: ${app.store.kind === 'supabase' ? 'Supabase' : 'קובץ מקומי'})`));
 }

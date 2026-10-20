@@ -8,8 +8,16 @@
  *
  * liveEmail: false = מצב בדיקה. כל מייל נשלח רק לחשבון המחובר, והנמען המקורי כתוב בנושא.
  *            true  = המיילים נשלחים ללקוחות ולסטודנטים עצמם. להפעיל רק עם נתונים אמיתיים.
+ *
+ * backend: 'auto' = אם הדף מוגש מהשרת של הסטודיו, הניהול נכנס עם חשבון גוגל ושומר בשרת.
+ *                   בלי שרת (למשל בגיטהאב) הוא עובד כדמו.
+ *          'demo' = תמיד דמו, גם כשיש שרת.
+ * startData: מה יש בניהול בפעם הראשונה, כשהשרת עוד ריק.
+ *            'demo' = נתוני הדוגמה (לפיתוח). 'empty' = ניהול ריק (לעבודה אמיתית).
  */
 window.TAMIMA_CONFIG = {
   googleClientId: '329242531588-mbv6kie5i8l05p83o4dcdijgcqs0p4tv.apps.googleusercontent.com',
-  liveEmail: false
+  liveEmail: false,
+  backend: 'auto',
+  startData: 'demo'
 };
