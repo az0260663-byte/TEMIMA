@@ -2,8 +2,9 @@
 'use strict';
 
   /* ---------- מסך הזיכוי ----------
-     הסכום מוצע (או ריק), ותמימה משנה אותו כרצונה. נחסם רק סכום מעל היתרה שלא זוכתה, כי סאמיט לא יאפשרו אותו.
-     שלוש החלטות: "ביצוע זיכוי" (הקריאה היחידה לזיכוי בסאמיט), "ללא החזר", "אחר כך". */
+     המערכת לא מחזירה כסף. תמימה מחזירה בסאמיט ("זיכוי באשראי") או בביט, ורושמת כאן: סכום, איך הוחזר, מספר מסמך הזיכוי וקובץ.
+     באשראי: מספר וקובץ חובה. בביט: רשות. מייל ללקוח רק כשצורף קובץ.
+     שלוש החלטות: "רישום זיכוי", "ללא החזר", "אחר כך". */
   function refundSheetHtml() {
     const f = ui.rf;
     const info = f && invoiceInfo(f.inv);
@@ -28,11 +29,17 @@
       ${f.suggested != null ? `<div class="policy"><b>סכום מוצע: ${money(f.suggested)}</b>${esc(f.why || '')}</div>` : ''}
       <label class="field"><span>סכום הזיכוי</span><span class="with-suffix"><input type="number" min="0" step="1" inputmode="decimal" data-bind="rf.amount" value="${esc(f.amount)}" ${invAttr('rf', 'amount')}>₪</span></label>
       ${f.info ? `<p class="muted small">${esc(f.info)}</p>` : ''}
+      <label class="field"><span>איך הוחזר</span><select data-bind="rf.method" data-rerender="sheet">${Object.entries(REFUND_METHOD).map(([k, l]) => `<option value="${k}" ${f.method === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      ${f.method === 'credit'
+        ? '<p class="muted small">בסאמיט: מודול הכנסות, פתיחת החשבונית, זיכוי מסמך, "זיכוי באשראי". אחר כך: שיתוף המסמך והורדה כ-PDF.</p>'
+        : '<p class="policy warn">לא לשכוח להפיק בסאמיט מסמך זיכוי רגיל לחשבונית המקורית, כדי ששתי המערכות יהיו מאוזנות.</p>'}
+      <label class="field"><span>מספר מסמך הזיכוי בסאמיט${f.method === 'bit' ? ' (לא חובה)' : ''}</span><input class="txt" inputmode="numeric" data-bind="rf.creditNo" value="${esc(f.creditNo || '')}" ${invAttr('rf', 'creditNo')}></label>
+      <label class="field"><span>קובץ מסמך הזיכוי (PDF)${f.method === 'bit' ? ' (לא חובה)' : ''}<small class="muted">${f.method === 'bit' ? 'בלי קובץ, הזיכוי נרשם, אבל לא נשלח מייל ללקוח.' : 'הקובץ נשמר בכרטיס, ונשלח ללקוח במייל.'}</small></span><input type="file" accept="application/pdf,image/*" data-rffile="1" ${invAttr('rf', 'file')}>${f.file ? `<small class="ok-line">✓ ${esc(f.file.name)}</small>` : ''}</label>
       ${errP('rf')}
-      <button class="btn primary block" data-act="refundDo" data-needs="rf.amount" ${String(f.amount).trim() ? '' : 'disabled'}>ביצוע זיכוי</button>
+      <button class="btn primary block" data-act="refundDo" data-needs="rf.amount" ${String(f.amount).trim() ? '' : 'disabled'}>רישום זיכוי</button>
       <button class="btn ghost block" data-act="refundSkip">${f.late && w && w.status !== 'cancelled' ? 'ביטול הסדנה ללא החזר' : 'ללא החזר'}</button>
       <button class="btn ghost block" data-act="refundLater">אחר כך</button>
-      ${ui.guided ? '<div class="demo-note"><b>מאחורי הקלעים</b><p>המערכת פותחת את הזיכוי לתמימה. ההחזר יוצא רק אחרי אישור שלה, בקריאה אחת ל-API של סאמיט שמחזירה את הכסף ומפיקה מסמך זיכוי.</p></div>' : ''}`;
+      ${ui.guided ? '<div class="demo-note"><b>מאחורי הקלעים</b><p>המערכת לא מחזירה כסף ולא פונה לסאמיט. תמימה מחזירה בסאמיט או בביט, והזיכוי נרשם כאן כמסמך נגדי לחשבונית. בהכנסות הוא מופיע במינוס.</p></div>' : ''}`;
   }
   // פתיחת מסך הזיכוי. אם כבר יש לחשבונית זיכוי שממתין להחלטה, נפתח אותו
   function openRefund(inv, o = {}) {
@@ -43,7 +50,7 @@
     const sug = o.reason ? o.suggested : suggestRefund(info);
     const suggested = o.reason ? (sug == null ? null : sug) : sug.amount;
     ui.rf = { inv, caseId: o.caseId || null, wsId: o.wsId || null, studentId: o.studentId || null, late: !!o.late, reason: o.reason || 'manual', suggested,
-      why: o.reason ? o.why || '' : sug.why, info: o.info || '', amount: suggested == null ? '' : String(Math.round(suggested * 100) / 100), err: '', errField: '' };
+      why: o.reason ? o.why || '' : sug.why, info: o.info || '', amount: suggested == null ? '' : String(Math.round(suggested * 100) / 100), method: 'credit', creditNo: '', file: null, err: '', errField: '' };
     openSheet(refundSheetHtml);
   }
   function openCaseSheet(id) {
@@ -247,8 +254,8 @@
       </div>`));
     pendingReceipts().forEach(w => items.push(`
       <div class="todo">
-        <div class="todo-main">${chip('להפיק קבלה', 'salon')}<b>${srcLabel(w)}, ${esc(w.customer.name)}</b><small>${shortDay(w.date)} ${w.time} · ${w.n} משתתפים · ${money(w.amount)}</small></div>
-        <a class="btn small primary" href="#/tamima/receipts/${w.id}" aria-label="להפקת קבלה: ${esc(w.customer.name)}, ${shortDay(w.date)}">להפקת קבלה</a>
+        <div class="todo-main">${chip(w.needsDetails ? 'חסרים פרטי לקוח' : 'להפיק קבלה', 'salon')}<b>${w.needsDetails ? `סדנה נמכרה דרך ${esc(chName(w.source))}` : `${srcLabel(w)}, ${esc(w.customer.name)}`}</b><small>${shortDay(w.date)} ${w.time} · ${w.n} משתתפים · ${money(w.amount)}</small></div>
+        <a class="btn small primary" href="#/tamima/receipts/${w.id}" aria-label="${w.needsDetails ? 'הוספת פרטי לקוח' : 'להפקת קבלה'}: ${shortDay(w.date)} ${w.time}">${w.needsDetails ? 'הוספת פרטים' : 'להפקת קבלה'}</a>
       </div>`));
     S.lessons.filter(l => lEnd(l) < now() && !att(l.id).marked && !l.cancelled && group(l.groupId).active !== false && (lessonStudents(l).length || roster(l).guests.length)).forEach(l => items.push(`
       <div class="todo">
@@ -276,6 +283,8 @@
     const classes = S.payments.filter(p => inM(p.date)).reduce((a, p) => a + p.amount, 0);
     const total = site + salon + classes || 1;
     const fee = activeWorkshops().filter(w => inM(w.date)).reduce((a, w) => a + commissionOf(w), 0);
+    // זיכויים שנרשמו החודש מופיעים במינוס, כדי שסיכום ההכנסות יהיה נכון
+    const refunded = S.refunds.filter(r => inM(r.date)).reduce((a, r) => a + r.amount, 0);
     const seg = (v, k) => `<span class="bar-${k}" style="width:${(v / total) * 100}%"></span>`;
 
     // במחשב: "ממתין לך" בעמודה אחת, "היום" ו"החודש" בעמודה לידה. בטלפון ובטאבלט: אחד מתחת לשני
@@ -286,13 +295,15 @@
       <h2 class="sec">היום</h2>
       ${card(today.length ? today.map(x => x.html).join('') : empty('אין שיעורים או סדנאות היום.'))}
       <h2 class="sec">החודש, ${MONTHS[startOfToday().getMonth()]}</h2>
-      ${card(`<div class="metric-big"><small>הכנסות החודש</small><b>${money(site + salon + classes)}</b></div>
+      ${card(`<div class="metric-big"><small>הכנסות החודש</small><b>${money(site + salon + classes - refunded)}</b></div>
         <div class="bar">${seg(classes, 'class')}${seg(site, 'site')}${seg(salon, 'salon')}</div>
         <ul class="legend-list">
           <li><span class="dot dot-class"></span>חוגים<b>${money(classes)}</b></li>
           <li><span class="dot dot-site"></span>סדנאות מהאתר<b>${money(site)}</b></li>
           <li><span class="dot dot-salon"></span>סדנאות מערוצי שיווק<b>${money(salon)}</b></li>
+          ${refunded ? `<li class="fee">זיכויים<b>−${money(refunded)}</b></li>` : ''}
           <li class="fee">עמלות לערוצים<b>${money(fee)}</b></li>
+          ${salon ? `<li class="fee">נטו מערוצי שיווק (אחרי עמלה)<b>${money(salon - fee)}</b></li>` : ''}
         </ul>`)}</section></div>`;
   }
 
@@ -1497,7 +1508,10 @@
       <h3>הזמנות</h3>${ws.map(w => `<button class="ws-row" data-act="wsSheet" data-id="${w.id}"><span class="dot dot-${srcCss(w)}"></span>
         <div><b>${longDay(w.date)}, ${w.time}</b><small>${w.n} משתתפים · ${money(w.amount)} · ${isOwn(w) ? 'מהאתר' : esc(chName(w.source))}</small></div>${w.status === 'cancelled' ? chip('בוטלה', 'muted') : ''}</button>`).join('') || empty('אין הזמנות.')}
       <h3>חשבוניות</h3>${inv.map(w => `<div class="pay-row"><span>חשבונית מס קבלה מס׳ ${w.invoice} · ${money(w.amount)} · ${shortDay(w.date)}</span>
-        <div class="btn-row">${pdfBtn(w.invoice)}${isOwn(w) && refundable(w.invoice) ? `<button class="btn ghost small" data-act="refundOpen" data-inv="${w.invoice}">זיכוי</button>` : ''}</div>${refundLines(w.invoice)}</div>`).join('') || empty('אין חשבוניות עדיין.')}
+        <div class="btn-row">${pdfBtn(w.invoice)}${isOwn(w) && refundable(w.invoice) ? `<button class="btn ghost small" data-act="refundOpen" data-inv="${w.invoice}">זיכוי</button>` : ''}</div>${refundLines(w.invoice)}</div>`).join('')}
+        ${stu ? S.payments.filter(p => p.studentId === stu.id).map(p => `<div class="pay-row"><span>חשבונית מס קבלה מס׳ ${p.invoice} · ${money(p.amount)} · כרטיסייה · ${shortDay(p.date)}</span>
+        <div class="btn-row">${pdfBtn(p.invoice)}${refundable(p.invoice) ? `<button class="btn ghost small" data-act="refundOpen" data-inv="${p.invoice}">זיכוי</button>` : ''}</div>${refundLines(p.invoice)}</div>`).join('') : ''}
+        ${inv.length || (stu && S.payments.some(p => p.studentId === stu.id)) ? '' : empty('אין חשבוניות עדיין.')}
       ${(S.customers || []).length > 1 && !c.anonymizedAt ? `<button class="btn ghost block" data-act="custMergePick" data-id="${c.id}">איחוד עם לקוח אחר</button>` : ''}
       ${c.anonymizedAt ? '' : `<button class="btn ghost block" data-act="anonAsk" data-kind="customer" data-id="${c.id}">אנונימיזציה</button>`}`;
   }
@@ -1517,20 +1531,30 @@
   function tReceipts(wid) {
     const w = workshop(wid);
     if (w && w.receipt !== 'auto') {
-      if (!ui.rcpt || ui.rcpt.wid !== wid) ui.rcpt = { wid, name: w.customer.name, amount: w.amount, date: w.date, done: w.receipt !== 'pending' };
+      if (!ui.rcpt || ui.rcpt.wid !== wid) ui.rcpt = { wid, name: w.needsDetails ? '' : w.customer.name, phone: w.customer.phone || '', email: w.customer.email || '', paste: '', n: w.n, amount: w.amount, date: w.date, err: '', errField: '', done: w.receipt !== 'pending' };
       const r = ui.rcpt;
+      // טלפון של לקוח מוכר: השם והמייל מתמלאים לבד
+      const known = r.phone && (S.customers || []).find(k => k.phones.includes(normPhone(r.phone)));
+      if (known) { if (!r.name) r.name = known.name; if (!r.email) r.email = known.email || ''; }
       if (w.receipt !== 'pending') {
         return `<a class="back" href="#/tamima/receipts">חזרה לקבלות</a><h1>הקבלה הופקה</h1>
-          ${card(`<div class="done-ic">✓</div><p class="center">הקבלה הופקה בסאמיט ונשלחה ללקוח.</p>${invoiceDoc(w.invoice, w.customer.name, `סדנת קרמיקה, ${w.n} משתתפים`, r.amount, w.date)}
+          ${card(`<div class="done-ic">✓</div><p class="center">הקבלה הופקה בסאמיט ונשמרה בכרטיס הלקוח${w.customer.email ? ', ונשלחה ללקוח במייל' : '. ללקוח אין מייל, ולכן היא לא נשלחה'}.</p>${invoiceDoc(w.invoice, w.customer.name, `סדנת קרמיקה, ${w.n} משתתפים`, r.amount, w.date)}
           <a class="btn primary block" href="#/tamima/receipts">חזרה לרשימה</a>`, 'done')}`;
       }
-      return `<a class="back" href="#/tamima/receipts">חזרה לקבלות</a><h1>קבלה ל${srcLabel(w)}</h1>
-        ${card(`<p class="muted small">הפרטים מולאו מראש מההזמנה. אפשר לתקן לפני ההפקה.</p>
-          <label class="field"><span>שם הלקוח</span><input data-bind="rcpt.name" value="${esc(r.name)}"></label>
-          <label class="field"><span>סכום</span><input data-bind="rcpt.amount" value="${esc(r.amount)}" inputmode="numeric"></label>
-          <label class="field"><span>תאריך הסדנה</span><input value="${dmy(r.date)}.${parse(r.date).getFullYear()}" disabled></label>
-          <label class="field"><span>פירוט</span><input value="סדנת קרמיקה, ${w.n} משתתפים" disabled></label>
-          <button class="btn primary block" data-act="issueReceipt" data-id="${w.id}">הפקה בסאמיט</button>`)}`;
+      const ch = G.channels.get(w.source);
+      return `<a class="back" href="#/tamima/receipts">חזרה לקבלות</a><h1>${w.needsDetails ? 'פרטי לקוח וקבלה' : 'קבלה'} · ${esc(chName(w.source))}</h1>
+        <p class="muted">${longDay(w.date)}, ${w.time}</p>
+        ${card(`<label class="field"><span>הדבקת הודעה<small class="muted">אם קיבלת את הפרטים בהודעה, אפשר להדביק אותה כאן. הטלפון, המייל והשם יזוהו לבד.</small></span><textarea data-bind="rcpt.paste" rows="3">${esc(r.paste)}</textarea></label>
+          <button class="btn ghost small" data-act="rcptParse">זיהוי הפרטים מההודעה</button>
+          <label class="field"><span>טלפון</span><input type="tel" dir="ltr" autocomplete="off" data-bind="rcpt.phone" data-rerender="page" value="${esc(r.phone)}" ${invAttr('rcpt', 'phone')}></label>
+          ${known ? `<p class="ok-line small">✓ לקוח מוכר: ${esc(known.name)}. הקבלה תירשם על הכרטיס הקיים.</p>` : ''}
+          <label class="field"><span>שם הלקוח</span><input data-bind="rcpt.name" value="${esc(r.name)}" ${invAttr('rcpt', 'name')}></label>
+          <label class="field"><span>מייל<small class="muted">לשם נשלחת הקבלה. בלי מייל הקבלה רק נשמרת בכרטיס.</small></span><input type="email" dir="ltr" data-bind="rcpt.email" value="${esc(r.email)}" ${invAttr('rcpt', 'email')}></label>
+          <label class="field"><span>משתתפים</span><input type="number" min="1" data-bind="rcpt.n" value="${esc(r.n)}" ${invAttr('rcpt', 'n')}></label>
+          <label class="field"><span>הסכום המלא ששילם הלקוח</span><span class="with-suffix"><input inputmode="numeric" data-bind="rcpt.amount" value="${esc(r.amount)}" ${invAttr('rcpt', 'amount')}>₪</span></label>
+          <p class="muted small">אמצעי התשלום בקבלה: "${esc(ch.receiptPayLabel || defaultPayLabel(ch))}". העמלה (${ch.commission}%) מחושבת רק אצלנו, לסיכום ההכנסות.</p>
+          ${errP('rcpt')}
+          <button class="btn primary block" data-act="issueReceipt" data-id="${w.id}">שמירה והפקת חשבונית מס קבלה</button>`)}`;
     }
     const pend = pendingReceipts();
     const issued = S.workshops.filter(x => !isOwn(x) && x.receipt === 'manual');
@@ -1585,6 +1609,7 @@
               </details>`;
           } else {
             inner = txt('name', 'שם') + set('commission', 'עמלה', '%', 100) + set('releaseDays', 'שחרור לאתר', 'ימים לפני') + set('bufferHours', 'המתנה לפני פתיחה באתר', 'שעות')
+              + `<label class="field inline"><span>אמצעי תשלום בקבלה<small class="muted">מה שיופיע בחשבונית מס קבלה לסדנה מהערוץ</small></span><input class="txt" data-chset="${ch.id}|receiptPayLabel" value="${esc(ch.receiptPayLabel || '')}" placeholder="${esc(defaultPayLabel(ch))}" ${off}></label>`
               + (ch.status === 'active' ? `<button class="btn ghost small" data-act="deactivateChannel" data-id="${ch.id}">סימון כלא פעיל</button>` : '<p class="muted small">היומן וההיסטוריה נשמרו.</p>');
           }
           inner += msg + (ui.guided ? `<details class="json"><summary>הגדרות הערוץ</summary><pre dir="ltr">${esc(JSON.stringify(ch, null, 2))}</pre></details>` : '');
@@ -1682,7 +1707,7 @@
       email('payReminder', toStudent(s), 'תזכורת: הכרטיסייה מחכה לתשלום', [`היי ${first(s)},`, `תזכורת קטנה: הכרטיסייה (${money(S.settings.cardPrice)}) מחכה לתשלום.`, 'תודה!'], { cta: ['לתשלום בסאמיט', studentUrl(s, 'pay')] });
       render();
     },
-    simPay(d) { payCard(student(d.id)); render(); },
+    simPay(d) { payCardOnline(student(d.id)); render(); },
     studentSheet(d) { location.hash = `#/tamima/student/${d.id}`; },
     goLesson(d) { const l = lesson(d.l); ui.lessonSel[l.groupId] = l.id; location.hash = `#/tamima/classes/${l.groupId}`; },
     selLesson(d) { ui.lessonSel[d.g] = d.l; render(); },
@@ -1730,9 +1755,9 @@
         const sp = G.msToWall(G.edgeMs(ev.start));
         const n = Number(ev.extendedProperties.shared.participants) || 2;
         const w = { id: uid('w'), source: ch.id, date: sp.slice(0, 10), time: sp.slice(11, 16), n, amount: price(n),
-          customer: { name: `לקוח דרך ${ch.name}`, phone: '', email: '' }, receipt: 'pending', invoice: null, feedbackSent: false };
+          customer: { name: `לקוח דרך ${ch.name}`, phone: '', email: '' }, needsDetails: true, receipt: 'pending', invoice: null, feedbackSent: false };
         bookWorkshop(w);
-        log('sync', `הזמנה נקלטה מהיומן של "${ch.name}"`, `${shortDay(w.date)} ${w.time}, ${n} משתתפים. נכנסה ליומן הסטודיו, נמחקה מכל יומני הערוצים, ומחכה לקבלה ידנית.`);
+        log('sync', `הזמנה נקלטה מהיומן של "${ch.name}"`, `${shortDay(w.date)} ${w.time}, ${n} משתתפים. נכנסה ליומן הסטודיו ונמחקה מכל יומני הערוצים. בבית אצל תמימה: "חסרים פרטי לקוח", ואחר כך הפקת קבלה.`);
         toast(`הזמנה חדשה דרך ${ch.name}`, `${shortDay(w.date)} ${w.time}, ${n} משתתפים`);
       });
       closeSheet(); render();
@@ -2325,33 +2350,27 @@
       f.errField = 'amount';
       const bad = msg => { f.err = msg; renderSheet(); ui.focusSel = '#sheet [data-bind="rf.amount"]'; focusPending(); };
       if (!raw || !(amt > 0)) { bad('נא למלא סכום גדול מאפס.'); return; }
-      if (amt > left + 0.001) { bad(`אי אפשר לזכות יותר מ-${money(left)}, היתרה שעוד לא זוכתה בחשבונית הזו. סאמיט לא יאפשרו זיכוי גבוה יותר.`); return; }
-      // הקריאה היחידה לזיכוי בסאמיט, רק אחרי הלחיצה של תמימה
-      const res = sumitRefund({ customer: info.customer, token: info.token, amount: amt, invoice: f.inv, desc: `זיכוי לחשבונית מס׳ ${f.inv}` });
-      let x = f.caseId && refundCase(f.caseId);
-      if (!res.ok) {
-        if (!x) x = openRefundCase({ inv: f.inv, reason: f.reason, wsId: f.wsId, studentId: f.studentId, suggested: f.suggested, why: f.why, info: f.info, late: f.late });
-        Object.assign(x, { status: 'failed', error: res.error, amountTried: amt });
-        audit(`זיכוי נכשל (${money(amt)})`, 'תמימה', info.name);
-        f.caseId = x.id;
-        log('sumit', 'סאמיט: הזיכוי נכשל', res.error);
-        email('refundFailed', toStudio(), `הזיכוי ל${info.name} לא בוצע`, ['שלום תמימה,', `הזיכוי של ${money(amt)} לחשבונית מס׳ ${f.inv} לא בוצע.`, res.error, 'הזיכוי מסומן "דורש טיפול" בבית.'], { cta: ['לטיפול', siteUrl('#/tamima/home')] });
-        toast('הזיכוי נכשל', `${info.name}: ${res.error}`);
-        f.errField = ''; f.err = `הזיכוי לא בוצע: ${res.error} הוא מסומן "דורש טיפול" בבית.`;
-        renderSheet(); return;
-      }
-      const r = { id: uid('rf'), invoice: f.inv, amount: amt, date: todayIso(), creditNo: res.creditNo, reason: f.reason || 'manual' };
+      if (amt > left + 0.001) { bad(`אי אפשר לזכות יותר מ-${money(left)}, היתרה שעוד לא זוכתה בחשבונית הזו.`); return; }
+      const no = String(f.creditNo || '').trim();
+      const field = (k, msg) => { f.errField = k; f.err = msg; renderSheet(); return false; };
+      if (no && !/^\d{1,12}$/.test(no)) return field('creditNo', 'מספר מסמך הזיכוי צריך להיות מספר.');
+      if (f.method === 'credit' && !no) return field('creditNo', 'בזיכוי באשראי צריך את מספר מסמך הזיכוי מסאמיט.');
+      if (f.method === 'credit' && !f.file) return field('file', 'בזיכוי באשראי צריך לצרף את קובץ מסמך הזיכוי מסאמיט.');
+      // המערכת לא פונה לסאמיט: רק רושמת את מה שתמימה כבר עשתה
+      const x = f.caseId && refundCase(f.caseId);
+      const r = { id: uid('rf'), invoice: f.inv, amount: amt, date: todayIso(), method: f.method, creditNo: no ? Number(no) : null, file: f.file || null, reason: f.reason || 'manual' };
       S.refunds.push(r);
       if (x) Object.assign(x, { status: 'done', refundId: r.id });
-      audit(`זיכוי ${money(amt)} לחשבונית ${f.inv}`, 'תמימה', info.name);
+      audit(`זיכוי ${money(amt)} לחשבונית ${f.inv} (${REFUND_METHOD[r.method]})`, 'תמימה', info.name);
       if (f.late && f.wsId && workshop(f.wsId).lateRequest) workshop(f.wsId).lateRequest.status = 'done';
-      log('sumit', 'סאמיט: הזיכוי בוצע', `${info.name}, ${money(amt)}. ההחזר יצא לכרטיס האשראי, והופקה חשבונית מס קבלה זיכוי מס׳ ${r.creditNo}.`);
+      log('notify', `זיכוי נרשם: ${info.name}`, `${money(amt)} לחשבונית מס׳ ${f.inv}, ${REFUND_METHOD[r.method]}${r.creditNo ? `, מסמך זיכוי מס׳ ${r.creditNo}` : ''}. ${refundMailable(r) ? 'נשלח מייל ללקוח עם מסמך הזיכוי.' : 'לא צורף קובץ, ולכן לא נשלח מייל ללקוח.'}`);
       const w = f.wsId && workshop(f.wsId);
-      if (w) { if (w.status !== 'cancelled') dropWorkshop(w); wsCancelMail(w, r); }
-      else email(info.kind === 'ws' ? 'refund' : 'refundStudent', info.to, `זיכוי ${money(amt)}, חשבונית מס קבלה זיכוי מס׳ ${r.creditNo}`, [`שלום ${info.name.split(' ')[0]},`, `בוצע זיכוי של ${money(amt)} עבור חשבונית מס קבלה מס׳ ${f.inv} (${info.desc}).`, 'ההחזר בוצע לכרטיס האשראי. מסמך זיכוי מצורף.'], { extra: creditMailHtml(r) });
+      const mail = refundMailable(r) ? r : null;
+      if (w) { if (w.status !== 'cancelled') dropWorkshop(w); wsCancelMail(w, mail); }
+      else if (mail) email(info.kind === 'ws' ? 'refund' : 'refundStudent', info.to, `הוחזרו לך ${money(amt)}`, [`שלום ${info.name.split(' ')[0]},`, `הוחזרו לך ${money(amt)} עבור חשבונית מס קבלה מס׳ ${f.inv} (${info.desc}), ${REFUND_METHOD[r.method]}.`, 'מסמך הזיכוי מצורף.'], { extra: creditMailHtml(r) });
       ui.rf = null;
       closeSheet(); render();
-      snack(`הזיכוי בוצע: ${money(amt)}. מסמך זיכוי מס׳ ${r.creditNo}.`);
+      snack(`הזיכוי נרשם: ${money(amt)}.${mail ? ' נשלח מייל ללקוח.' : ''}`);
     },
     // ללא החזר: אין קריאה לסאמיט. בסדנה, הלקוח מקבל "הסדנה בוטלה" בלי אזכור של החזר
     refundSkip() {
@@ -2371,7 +2390,6 @@
       ui.rf = null; closeSheet(); render();
       snack('הזיכוי ממתין להחלטה ב"ממתין לך עכשיו".');
     },
-    creditDoc(d) { const r = S.refunds.find(x => x.id === d.id); if (r) openSheet(() => creditDocHtml(r)); },
     wsRestore(d) { const err = setWorkshopCancelled(d.id, false); closeSheet(); render(); snack(err || 'הסדנה חזרה ליומן.'); },
 
     /* ---------- עריכה: חסימות ---------- */
@@ -2401,13 +2419,49 @@
       log('whatsapp', `הודעת משוב בוואטסאפ ל${w.customer.name}`, `היי ${w.customer.name.split(' ')[0]}, תודה שהגעתם לסדנה! איך היה?`);
       render();
     },
+    // הדבקת הודעה: מזהה טלפון, מייל ושם (מה שנשאר אחרי הטלפון והמייל)
+    rcptParse() {
+      const r = ui.rcpt, t = String(r.paste || '');
+      const email = (t.match(/[^\s@,;:]+@[^\s@,;:]+\.[a-z]{2,}/i) || [''])[0];
+      const phone = (t.replace(email, ' ').match(/(\+?972[\s-]?|0)5\d(?:[\s-]?\d){7}|0\d(?:[\s-]?\d){7}/) || [''])[0];
+      // השם: אחרי "שם:" אם יש, אחרת המילים שלפני הטלפון (או המייל), אחרי הנקודתיים או הפסיק האחרונים
+      const SKIP = ['היי', 'הי', 'שלום', 'תמימה', 'תודה', 'רבה', 'בבקשה', 'פרטים', 'הלקוח', 'הלקוחה', 'של', 'הנה', 'סדנה', 'לסדנה'];
+      const words = s => s.replace(/[^֐-׿a-zA-Z'" -]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x => x && !SKIP.includes(x));
+      const labeled = (t.match(/שם\s*[:：]\s*([^\n,;:0-9@]+)/) || [])[1];
+      const cut = phone ? t.indexOf(phone) : email ? t.indexOf(email) : t.length;
+      const before = t.slice(0, cut).split(/[:：,\n]/).filter(x => words(x).length).pop() || '';
+      // אין שם לפני הטלפון: המילים שאחריו
+      const after = words(t.slice(cut).replace(phone, ' ').replace(email, ' ').replace(/\d+\s*משתתפים/g, ' ')).slice(0, 3).join(' ');
+      const name = labeled ? words(labeled).slice(0, 3).join(' ') : words(before).slice(-3).join(' ') || after;
+      const n = (t.match(/(\d+)\s*משתתפים/) || [])[1];
+      Object.assign(r, { phone: phone.trim() || r.phone, email: email || r.email, name: name || r.name, n: n ? Number(n) : r.n, err: '', errField: '' });
+      render();
+      snack(phone || email ? 'הפרטים זוהו. כדאי לבדוק לפני השמירה.' : 'לא זוהו טלפון או מייל בהודעה.');
+    },
+    // סדנה מערוץ שיווק: שמירת פרטי הלקוח (כרטיס חדש או קיים לפי טלפון), והפקת חשבונית מס קבלה בסאמיט על הסכום המלא
     issueReceipt(d) {
-      const w = workshop(d.id);
-      const amount = Number(String(ui.rcpt.amount).replace(/[^\d.]/g, '')) || w.amount;
-      w.customer.name = ui.rcpt.name.trim() || w.customer.name; ui.rcpt.amount = amount;
-      w.receipt = 'manual'; w.invoice = sumitCreateDocument(w.customer, wsDesc(w), amount);
+      const w = workshop(d.id), r = ui.rcpt;
+      const amount = Number(String(r.amount).replace(/[^\d.]/g, ''));
+      const n = Number(r.n);
+      const bad = (k, msg) => { r.errField = k; r.err = msg; render(); ui.focusSel = `[data-bind="rcpt.${k}"]`; focusPending(); };
+      const ph = normPhone(r.phone);
+      if (!/^0\d{8,9}$/.test(ph)) return bad('phone', 'נא למלא טלפון תקין. לפיו מזהים את הלקוח.');
+      if (!String(r.name).trim()) return bad('name', 'נא למלא את שם הלקוח.');
+      if (r.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim())) return bad('email', 'כתובת המייל לא תקינה.');
+      if (!(n >= 1)) return bad('n', 'נא למלא מספר משתתפים.');
+      if (!(amount > 0)) return bad('amount', 'נא למלא את הסכום ששילם הלקוח.');
+      Object.assign(w, { n, amount, customer: { name: r.name.trim(), phone: r.phone.trim(), email: (r.email || '').trim() } });
+      delete w.needsDetails;
+      const cu = customerFor(w.customer, { fromChannel: w.source });
+      w.customerId = cu.id;
+      const ch = G.channels.get(w.source);
+      const doc = sumitCreateDocument(w.customer, sumitIdOf(cu), wsDesc(w), amount, ch.receiptPayLabel || defaultPayLabel(ch));
+      addSumitId(cu, doc.CustomerID);
+      Object.assign(w, { receipt: 'manual', invoice: doc.DocumentNumber, docId: doc.DocumentID, paidAt: todayIso() });
+      ui.rcpt.done = true;
       if (w.eventId) G.events.patch({ calendarId: CAL.studio, eventId: w.eventId, requestBody: { summary: X.workshopEvent(w).summary, extendedProperties: { private: { receipt: String(w.invoice) } } } });
-      email('receipt', toCustomer(w), `חשבונית מס קבלה מס׳ ${w.invoice}`, [`שלום ${w.customer.name.split(' ')[0]},`, `מצורפת חשבונית מס קבלה מס׳ ${w.invoice} עבור הסדנה ב${longDay(w.date)}.`]);
+      if (w.customer.email) email('receipt', toCustomer(w), `חשבונית מס קבלה מס׳ ${w.invoice}`, [`שלום ${w.customer.name.split(' ')[0]},`, `מצורפת חשבונית מס קבלה מס׳ ${w.invoice} עבור הסדנה ב${longDay(w.date)}.`], { extra: receiptMailHtml(w.invoice, w.customer.name, wsDesc(w), amount, w.paidAt) });
+      audit(`חשבונית מס קבלה ${w.invoice} לסדנה מ${chName(w.source)}`, 'תמימה', w.customer.name);
       render(); scrollTop();
     },
 
@@ -2431,3 +2485,15 @@
     ui.chMsgT = setTimeout(() => { if (ui.chMsg && ui.chMsg.ok) { ui.chMsg = null; if (route().page === 'more') render(); } }, 4000);
   }
 
+
+  /* קובץ מסמך הזיכוי שתמימה מצרפת. בדמו נשמר בתוך הנתונים. בגרסה האמיתית: באחסון הקבצים הפרטי של Supabase */
+  const REFUND_FILE_MAX = 400 * 1024;
+  document.addEventListener('change', e => {
+    if (!e.target.matches('[data-rffile]') || !ui.rf) return;
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (file.size > REFUND_FILE_MAX) { ui.rf.errField = 'file'; ui.rf.err = 'הקובץ גדול מדי. אפשר עד 400 קילובייט.'; renderSheet(); return; }
+    const rd = new FileReader();
+    rd.onload = () => { if (!ui.rf) return; ui.rf.file = { name: file.name, url: rd.result }; if (ui.rf.errField === 'file') { ui.rf.err = ''; ui.rf.errField = ''; } renderSheet(); };
+    rd.readAsDataURL(file);
+  });

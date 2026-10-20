@@ -201,7 +201,7 @@
       });
       // כרטיס לקוח לכל מי שהזמין, כמו בהזמנה אמיתית
       const w = workshops[workshops.length - 1];
-      const c = { id: `c${i + 1}`, name, phones: [w.customer.phone.replace(/\D/g, '')], email: w.customer.email, sumitId: '', token: '', lateMoveUsed: '', studentId: null, since: p.date < iso(today) ? p.date : iso(today), notSame: [] };
+      const c = { id: `c${i + 1}`, name, phones: [w.customer.phone.replace(/\D/g, '')], email: w.customer.email, sumitIds: [], lateMoveUsed: '', studentId: null, since: p.date < iso(today) ? p.date : iso(today), notSame: [] };
       customers.push(c);
       w.customerId = c.id;
     });
@@ -270,7 +270,7 @@
       workshops, content, log: [],
       // נתוני הדגמה: פנייה חדשה לקורס מהאתר, מחכה שתמימה תחזור אליה
       leads: [{ id: 'ld1', name: 'שירה גולן', phone: '054-7781203', email: 'lead1@example.com', group: 'tue', handled: false, status: 'new', at: iso(addDays(today, -1)) }], nextInvoice: invoice, seq: 1,
-      customers,        // כרטיסי לקוחות: { id, name, phones, email, sumitId, token, lateMoveUsed, studentId, since }
+      customers,        // כרטיסי לקוחות: { id, name, phones, email, sumitIds (מזהי הלקוח בסאמיט), lateMoveUsed, studentId, since }
       refundCases: [],
       privacyRequests: [], // בקשות עיון או מחיקה מהאזור האישי
       audit: [],        // יומן פעולות: { at, action, who, target }  // זיכוי ממתין להחלטה: { id, inv, reason, suggested, status, wsId, studentId }

@@ -399,7 +399,9 @@
       if (!w) return A.bkExpire();
       Object.assign(w.customer, { name: bk.name.trim(), phone: bk.phone.trim(), email: bk.email.trim() });
       touchHold(w.id);
-      sumitBeginRedirect({ id: w.id, customer: w.customer, amount: w.amount, desc: wsDesc(w) });
+      // לקוח מוכר (לפי טלפון) נשלח עם המזהה שלו בסאמיט, כדי שהקבלה תירשם על אותו כרטיס
+      const known = (S.customers || []).find(k => k.phones.includes(normPhone(w.customer.phone)));
+      sumitBeginRedirect({ id: w.id, customer: w.customer, sumitId: sumitIdOf(known), amount: w.amount, desc: wsDesc(w) });
       bk.err = ''; bk.step = 'pay';
       render(); scrollTop();
     },
@@ -426,12 +428,17 @@
         expireOrder(w0.id, true); bk.hold = null; bk.step = 'slot'; bk.time = null;
         bk.err = 'המועד כבר לא זמין, ולא בוצע חיוב. בחרו מועד אחר.'; render(); scrollTop(); return;
       }
-      // הלקוח משלם בדף של סאמיט. סאמיט מפיק חשבונית מס קבלה, שומר טוקן ושולח הודעת שרת (IPN)
-      const paymentId = sumitCustomerPaid({ id: w0.id, amount: w0.amount });
+      // הלקוח משלם בדף של סאמיט. סאמיט מפיק חשבונית מס קבלה, שולח הודעת שרת (IPN), ומחזיר את הלקוח לאתר עם og-paymentid
+      const known = (S.customers || []).find(k => k.phones.includes(normPhone(w0.customer.phone)));
+      const back = sumitCustomerPaid({ id: w0.id, amount: w0.amount, sumitId: sumitIdOf(known) });
       bk.err = ''; bk.step = 'confirming'; render(); scrollTop();
-      // "שולם" רק אחרי הודעת השרת ואימות התשלום, לא מדף התודה
+      // "שולם" רק אחרי אימות מול סאמיט. שתי הדרכים מגיעות לאותו אישור, ומה שמגיע שני מקבל "כבר אושר"
       setTimeout(() => {
-        const w = sumitIpn(paymentId);
+        const order = sumitStore().ipnFirst ? ['ipn', 'return'] : ['return', 'ipn'];
+        sumitStore().ipnFirst = false;
+        const res = order.map(via => confirmPayment(back['og-paymentid'], via));
+        if (res.some(x => x.result === 'already')) log('sumit', 'אישור כפול נעצר', `${order[1] === 'ipn' ? 'הודעת השרת מסאמיט' : 'החזרה לאתר'} הגיעה אחרי שההזמנה כבר אושרה. לא נוצרה הזמנה שנייה, ולא נשלח מייל שני.`);
+        const w = (res.find(x => x.result === 'confirmed') || {}).w;
         if (!w) { bk.step = 'pay'; bk.err = 'לא הצלחנו לאמת את התשלום. אפשר לנסות שוב.'; render(); return; }
         bk.hold = null;
         email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, `חשבונית מס קבלה מס׳ ${w.invoice} מצורפת.`, `ביטול או שינוי מועד עד ${S.settings.workshopCancelHours} שעות לפני הסדנה, בקישור למטה. ביטול מאוחר יותר אינו כולל החזר.`, 'נתראה, תמימה'], { extra: receiptMailHtml(w.invoice, w.customer.name, wsDesc(w), w.amount, w.paidAt), cta: ['לניהול ההזמנה', bookingUrl(w)] });

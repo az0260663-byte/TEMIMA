@@ -340,6 +340,7 @@ small { color: var(--muted); }
 
 .field { display: block; margin-bottom: 14px; }
 .field > span { display: block; font-size: .84rem; font-weight: 500; color: var(--ink-2); margin-bottom: 6px; }
+.field > span > small { display: block; font-weight: 400; margin-top: 2px; }
 .field input, .field select {
   width: 100%; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 14px; background: #fffefb; min-height: 50px;
   transition: border-color .2s, box-shadow .2s;

@@ -306,7 +306,7 @@
     if (gsLive()) GS.disconnect(false); // לא מעלים את נתוני הדמו מחדש ליומן אמיתי
     reset(); location.hash = '#/client'; render();
   });
-  $('#failRefundBtn').addEventListener('click', () => { closeTools(); sumitStore().failNextRefund = true; snack('הזיכוי הבא שתמימה תבצע ייכשל בסאמיט, כדי לראות מה קורה.'); });
+  $('#ipnFirstBtn').addEventListener('click', () => { closeTools(); sumitStore().ipnFirst = true; snack('בתשלום הבא באתר, הודעת השרת מסאמיט תגיע לפני החזרה לאתר. ב"מאחורי הקלעים" רואים שההזמנה מאושרת פעם אחת בלבד.'); });
   $('#advBtn').addEventListener('click', () => { closeTools(); beginStep('קדם זמן: יום אחד'); A.advance({ h: 24 }); });
   // תפריט הכלים של הדמו: נסגר ב-X, ב-Esc, בלחיצה מחוץ לו, ואחרי בחירה
   const toolsBtn = $('#toolsBtn'), toolsMenu = $('#toolsMenu');

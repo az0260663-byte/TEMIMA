@@ -518,12 +518,13 @@
       // לכל סוג ערוץ השדות שרלוונטיים לו
       const fields = ch.home
         ? ['name', 'commission', 'horizonDays', 'minNoticeHours', 'autoFill', 'slotTimes', 'travelMinutes']
-        : ['name', 'commission', 'releaseDays', 'bufferHours'];
+        : ['name', 'commission', 'releaseDays', 'bufferHours', 'receiptPayLabel'];
       const changed = {};
       fields.forEach(k => {
         if (patch[k] === undefined) return;
         let v = patch[k];
         if (k === 'name') { v = String(v).trim(); if (!v) throw apiError(400, 'required', 'Missing channel name.'); }
+        else if (k === 'receiptPayLabel') v = String(v).trim().slice(0, 80); // אמצעי התשלום שיופיע בקבלה. ריק = ברירת המחדל
         else if (k === 'autoFill') v = !!v;
         else if (k === 'slotTimes') {
           const out = {};

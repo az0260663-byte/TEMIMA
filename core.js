@@ -145,7 +145,7 @@
     const ph = normPhone(c.phone);
     let x = ph ? S.customers.find(k => k.phones.includes(ph)) : null;
     if (!x) {
-      x = { id: uid('c'), name: c.name, phones: ph ? [ph] : [], email: c.email || '', sumitId: '', token: '', lateMoveUsed: '', studentId: null, since: todayIso(), notSame: [] };
+      x = { id: uid('c'), name: c.name, phones: ph ? [ph] : [], email: c.email || '', sumitIds: [], lateMoveUsed: '', studentId: null, since: todayIso(), notSame: [] };
       S.customers.push(x);
       const twin = mergeCandidates(x)[0];
       if (twin) log('notify', `אולי זה אותו לקוח? ${x.name}`, `אותו מייל כמו ${twin.name}, עם טלפון אחר. אפשר לאחד בכרטיס הלקוח.`);
@@ -162,8 +162,7 @@
     S.workshops.forEach(w => { if (w.customerId === d.id) w.customerId = k.id; });
     k.phones = [...new Set(k.phones.concat(d.phones))];
     if (!k.email) k.email = d.email;
-    if (!k.sumitId) k.sumitId = d.sumitId;
-    if (!k.token) k.token = d.token;
+    k.sumitIds = [...new Set((k.sumitIds || []).concat(d.sumitIds || []))];
     if (!k.studentId) k.studentId = d.studentId;
     if (d.lateMoveUsed && (!k.lateMoveUsed || d.lateMoveUsed > k.lateMoveUsed)) k.lateMoveUsed = d.lateMoveUsed;
     S.customers = S.customers.filter(x => x.id !== d.id);
@@ -175,7 +174,8 @@
 
   // כתיבת סדנה: נתוני האפליקציה, אירוע ביומן הסטודיו, והמשבצת נמחקת מכל יומני הערוצים
   function bookWorkshop(w) {
-    const c = customerFor(w.customer);
+    // סדנה מערוץ שיווק מגיעה בלי פרטי לקוח. כרטיס הלקוח נוצר רק כשתמימה ממלאת אותם
+    const c = !w.needsDetails && customerFor(w.customer);
     if (c) w.customerId = c.id;
     w.eventId = w.eventId || G.newId();
     if (!S.workshops.includes(w)) S.workshops.push(w);
@@ -272,28 +272,54 @@
   }
   const wsDesc = w => `סדנת קרמיקה, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}`;
 
-  // הודעת שרת מסאמיט (IPN): המערכת מאמתת את התשלום מול סאמיט, ורק אז ההזמנה "שולם", המועד נסגר ביומן והקבלה נשמרת בכרטיס הלקוח
-  function sumitIpn(paymentId) {
+  /* אישור תשלום: נקודה אחת לכל התשלומים (סדנה מהאתר, כרטיסייה של סטודנט).
+     שתי דרכים מגיעות אליה: הודעת השרת מסאמיט (IPN), והחזרה של הלקוח לאתר עם og-paymentid. מי שמגיע שני מקבל "כבר אושר".
+     תמיד מאמתים מול סאמיט: תשלום תקין, הזמנה שלנו, וסכום זהה למה שנשמר אצלנו. מחזירה { result, w | s } */
+  const sumitIdOf = x => (x && x.sumitIds && x.sumitIds.length ? x.sumitIds[x.sumitIds.length - 1] : '');
+  const addSumitId = (x, id) => { if (x && id) { x.sumitIds = x.sumitIds || []; if (!x.sumitIds.includes(id)) x.sumitIds.push(id); } };
+  function confirmPayment(paymentId, via) {
     const p = sumitGetPayment(paymentId);
-    const w = p && S.workshops.find(x => x.id === p.ExternalIdentifier);
-    if (!p || !p.ValidPayment || !w) { log('sumit', 'הודעת שרת מסאמיט נדחתה', 'התשלום לא אומת, ולכן ההזמנה לא סומנה "שולם".'); return null; }
-    if (w.status !== 'pending' && w.status !== 'expired') return w;   // הודעה כפולה
-    Object.assign(w, { status: 'confirmed', invoice: p.DocumentNumber, token: p.PaymentMethod.CreditCard_Token, paidAt: todayIso() });
+    const reject = why => { log('sumit', 'אישור תשלום נדחה', `${why} ההזמנה לא סומנה "שולם".`); return { result: 'rejected' }; };
+    if (!p || !p.ValidPayment) return reject('התשלום לא אומת מול סאמיט.');
+    // תשלום כרטיסייה שכבר נרשם: הודעה כפולה
+    const paid = S.payments.find(x => x.paymentId === p.PaymentID || (x.orderId && x.orderId === p.ExternalIdentifier));
+    if (paid) return { result: 'already', s: student(paid.studentId) };
+    const w = S.workshops.find(x => x.id === p.ExternalIdentifier);
+    const s = !w && S.students.find(x => x.payOrder && x.payOrder.id === p.ExternalIdentifier);
+    if (s) return confirmCard(s, p, via);
+    if (!w) return reject('אין אצלנו הזמנה עם המזהה הזה.');
+    if (w.paymentId === paymentId) return { result: 'already', w };
+    if (w.status !== 'pending' && w.status !== 'expired') return { result: 'already', w };
+    if (Number(p.Amount) !== Number(w.amount)) return reject(`הסכום בסאמיט (${money(p.Amount)}) שונה מהסכום בהזמנה (${money(w.amount)}).`);
+    return confirmWorkshop(w, p, via);
+  }
+  const VIA = { ipn: 'הודעת שרת מסאמיט', return: 'החזרה לאתר' };
+  function confirmCard(s, p, via) {
+    if (Number(p.Amount) !== Number(s.payOrder.amount)) { log('sumit', 'אישור תשלום נדחה', `הסכום בסאמיט שונה מהסכום שנדרש מ${s.name}.`); return { result: 'rejected' }; }
+    addSumitId(s, p.CustomerID);
+    payCard(s, { invoice: p.DocumentNumber, docId: p.DocumentID, paymentId: p.PaymentID, orderId: p.ExternalIdentifier });
+    s.payOrder = null;
+    log('sumit', `${VIA[via]}: התשלום אומת`, `${s.name}, כרטיסייה. חשבונית מס קבלה מס׳ ${p.DocumentNumber} נשמרה.`);
+    return { result: 'confirmed', s };
+  }
+  function confirmWorkshop(w, p, via) {
+    Object.assign(w, { status: 'confirmed', invoice: p.DocumentNumber, docId: p.DocumentID, paymentId: p.PaymentID, paidAt: todayIso() });
     delete w.holdUntil;
     const removed = bookWorkshop(w);
-    const cu = customerOf(w);
-    if (cu) { cu.token = w.token; if (!cu.sumitId) cu.sumitId = p.CustomerID; }
-    log('sumit', 'הודעת שרת מסאמיט: התשלום אומת', `ההזמנה סומנה "שולם". חשבונית מס קבלה מס׳ ${w.invoice} נשמרה בכרטיס הלקוח של ${w.customer.name}.`);
+    addSumitId(customerOf(w), p.CustomerID);
+    log('sumit', `${VIA[via]}: התשלום אומת`, `ההזמנה סומנה "שולם". חשבונית מס קבלה מס׳ ${w.invoice} נשמרה בכרטיס הלקוח של ${w.customer.name}.`);
     // רק משבצות של ערוצים אחרים (לא של האתר עצמו) נזכרות כאן
     const others = [...new Set(removed.filter(x => x.channel !== HOME).map(x => chName(x.channel)))];
     log('sync', 'היומן עודכן', `המשבצת ${shortDay(w.date)} ${w.time} נסגרה ולא תוצע יותר באתר${others.length ? `, וגם הוסרה מיומן ${others.map(n => `"${n}"`).join(' ומיומן ')}` : ''}.`);
-    return w;
+    return { result: 'confirmed', w };
   }
   const chName = id => X.channelName(id);
   const isOwn = w => w.source === HOME;
   const srcCss = w => (isOwn(w) ? 'site' : 'salon');
   const srcLabel = w => (isOwn(w) ? 'סדנה מהאתר' : `סדנה · ${chName(w.source)}`);
   const paidLabel = w => (w.paid === false ? 'לא שולמה' : w.manual ? 'שולמה (נרשם ידנית)' : isOwn(w) ? 'שולמה' : `שולמה בערוץ "${chName(w.source)}"`);
+  // אמצעי התשלום בקבלה לסדנה מערוץ שיווק (ניתן לשנות בהגדרות הערוץ)
+  const defaultPayLabel = ch => `שולם דרך ערוץ ${ch.name}`;
   const commissionOf = w => { const ch = G.channels.get(w.source); return ch && !ch.home ? w.amount * ch.commission / 100 : 0; };
   const whenMs = ms => { const d = new Date(ms); return `${shortDay(iso(d))} ${clock(d)}`; };
 
@@ -461,13 +487,23 @@
   }
   function unuseLesson(s) { if (s.used > 0) s.used--; }
 
+  /* תשלום כרטיסייה דרך דף התשלום של סאמיט, כמו כל תשלום: הזמנה עם מזהה שלנו, תשלום, ואישור אחרי אימות.
+     בדמו הלקוח "משלם" מיד. מחזיר את מספר החשבונית, או null אם האימות נכשל */
+  function payCardOnline(s) {
+    s.payOrder = { id: uid('cp'), amount: S.settings.cardPrice };
+    const order = { id: s.payOrder.id, customer: { name: s.name, phone: s.phone, email: s.email }, sumitId: sumitIdOf(s), amount: s.payOrder.amount, desc: `כרטיסייה, ${S.settings.cardSize} שיעורים` };
+    sumitBeginRedirect(order);
+    const back = sumitCustomerPaid(order);
+    const res = ['return', 'ipn'].map(via => confirmPayment(back['og-paymentid'], via));
+    return res.some(x => x.result === 'confirmed') ? back['og-documentnumber'] : null;
+  }
+  /* כרטיסייה ששולמה. o: מה שסאמיט החזיר אחרי אימות (invoice, docId, paymentId, orderId), או { manual: true } לתשלום שתמימה רושמת */
   function payCard(s, o = {}) {
-    const inv = S.nextInvoice++;
-    if (!o.manual && !s.token) s.token = newToken();
+    const inv = o.invoice || S.nextInvoice++;
     const opens = isLocked(s);                              // התשלום הראשון פותח את האזור האישי
-    S.payments.push({ id: uid('p'), studentId: s.id, date: todayIso(), amount: S.settings.cardPrice, invoice: inv });
+    S.payments.push({ id: uid('p'), studentId: s.id, date: todayIso(), amount: S.settings.cardPrice, invoice: inv, docId: o.docId || null, paymentId: o.paymentId || null, orderId: o.orderId || null, manual: !!o.manual });
     if (s.owes) { s.owes = false; s.firstDue = false; s.requestSent = false; s.reminded = null; } else s.nextPaid = true;
-    log('sumit', `סאמיט: התקבל תשלום מ${s.name}`, `${money(S.settings.cardPrice)}, חשבונית מס קבלה מס׳ ${inv} הופקה אוטומטית.`);
+    if (o.manual) log('sumit', `תשלום נרשם ידנית: ${s.name}`, `${money(S.settings.cardPrice)}, חשבונית מס קבלה מס׳ ${inv}.`);
     email('payReceipt', toStudent(s), `התשלום התקבל, חשבונית מס קבלה מס׳ ${inv}`, [`היי ${first(s)},`, `קיבלנו את התשלום על הכרטיסייה (${money(S.settings.cardPrice)}). תודה!`, `חשבונית מס קבלה מס׳ ${inv} מצורפת ונשמרת גם באפליקציה.`].concat(opens ? ['מעכשיו האזור האישי שלך פתוח: השיעורים, הכרטיסייה, ההשלמות והתשלומים. זה הקישור האישי שלך, כדאי לשמור אותו.'] : []), { cta: opens ? ['לאזור האישי שלי', studentUrl(s, 'home')] : ['לתשלומים שלי', studentUrl(s, 'payments')] });
     return inv;
   }
@@ -541,16 +577,19 @@
     </div>`;
   }
 
-  /* ---------- זיכוי (החזר) דרך סאמיט ----------
-     המערכת מבצעת זיכוי בכרטיס ומפיקה "חשבונית מס קבלה זיכוי" דרך ה-API של סאמיט. תמימה לא נכנסת לסאמיט. */
+  /* ---------- זיכוי (החזר) ----------
+     המערכת לא מחזירה כסף. תמימה מחזירה בסאמיט ("זיכוי באשראי") או בביט, ורושמת כאן זיכוי: מסמך נגדי לקבלה המקורית.
+     זיכוי: { id, invoice, amount, date, method: 'credit' | 'bit', creditNo, file: { name, url } | null, reason }
+     מייל ללקוח נשלח רק כשצורף קובץ של מסמך הזיכוי מסאמיט. */
+  const REFUND_METHOD = { credit: 'זיכוי באשראי (סאמיט)', bit: 'החזר בביט' };
   const refundsOf = inv => S.refunds.filter(r => r.invoice === inv);
   const refundedOf = inv => refundsOf(inv).reduce((a, r) => a + r.amount, 0);
   // פרטי חשבונית: כרטיסייה של סטודנט, או סדנה מהאתר (לסדנה מ"בסלון" אין זיכוי, ההחזר דרך "בסלון")
   function invoiceInfo(inv) {
     const p = S.payments.find(x => x.invoice === inv);
-    if (p) { const s = student(p.studentId); return { inv, kind: 'card', p, s, amount: p.amount, date: p.date, name: s.name, to: toStudent(s), customer: s, token: s.token || '', desc: `כרטיסייה, ${S.settings.cardSize} שיעורים` }; }
+    if (p) { const s = student(p.studentId); return { inv, kind: 'card', p, s, amount: p.amount, date: p.date, name: s.name, to: toStudent(s), customer: s, desc: `כרטיסייה, ${S.settings.cardSize} שיעורים` }; }
     const w = S.workshops.find(x => x.invoice === inv && isOwn(x));
-    if (w) return { inv, kind: 'ws', w, amount: w.amount, date: w.paidAt || w.date, name: w.customer.name, to: toCustomer(w), customer: w.customer, token: w.token || (customerOf(w) || {}).token || '', desc: wsDesc(w) };
+    if (w) return { inv, kind: 'ws', w, amount: w.amount, date: w.paidAt || w.date, name: w.customer.name, to: toCustomer(w), customer: w.customer, desc: wsDesc(w) };
     return null;
   }
   const refundable = inv => { const i = invoiceInfo(inv); return !!i && refundedOf(inv) < i.amount; };
@@ -576,33 +615,35 @@
     return { amount: 0, why: 'כל השיעורים בכרטיסייה הזו כבר נוצלו.' };
   }
   // שורות "זוכה X ₪ · מסמך זיכוי מס׳ Y" ליד החשבונית המקורית
-  const refundLines = inv => refundsOf(inv).map(r => `<button class="refund-line" data-act="pdf" data-credit="${r.id}">זוכה ${money(r.amount)} · מסמך זיכוי מס׳ ${r.creditNo}</button>`).join('');
+  const refundLines = inv => refundsOf(inv).map(r => `<button class="refund-line" data-act="creditDoc" data-id="${r.id}">זוכה ${money(r.amount)} · ${r.creditNo ? `מסמך זיכוי מס׳ ${r.creditNo}` : REFUND_METHOD[r.method || 'credit']}</button>`).join('');
   function creditDocHtml(r) {
     const info = invoiceInfo(r.invoice);
-    return `<div class="invoice credit">
-      <div class="inv-head"><b>הסטודיו של תמימה</b><small>${esc(S.content.address)}</small></div>
-      <h3>חשבונית מס קבלה זיכוי מס׳ ${r.creditNo}</h3>
+    return `<h2>זיכוי לחשבונית מס׳ ${r.invoice}</h2>
       <dl class="kv">
-        <dt>תאריך</dt><dd>${dmy(r.date)}.${parse(r.date).getFullYear()}</dd>
+        <dt>תאריך</dt><dd>${fullDate(r.date)}</dd>
         <dt>לכבוד</dt><dd>${esc(info ? info.name : '')}</dd>
-        <dt>פירוט</dt><dd>זיכוי לחשבונית מס קבלה מס׳ ${r.invoice}${info ? ` · ${esc(info.desc)}` : ''}</dd>
+        <dt>פירוט</dt><dd>${info ? esc(info.desc) : ''}</dd>
         <dt>סכום</dt><dd><b>−${money(r.amount)}</b></dd>
-        <dt>אמצעי</dt><dd>זיכוי לכרטיס האשראי (סאמיט)</dd>
+        <dt>איך הוחזר</dt><dd>${REFUND_METHOD[r.method || 'credit']}</dd>
+        <dt>מסמך זיכוי</dt><dd>${r.creditNo ? `מס׳ ${r.creditNo}` : 'לא הוזן'}</dd>
+        <dt>קובץ</dt><dd>${r.file ? `<a href="${esc(r.file.url)}" target="_blank" rel="noopener" download="${esc(r.file.name)}">${esc(r.file.name)}</a>` : 'לא צורף'}</dd>
       </dl>
-    </div>`;
+      ${r.method === 'bit' && !r.creditNo ? '<p class="policy warn">לא לשכוח להפיק בסאמיט מסמך זיכוי לחשבונית המקורית, כדי ששתי המערכות יהיו מאוזנות.</p>' : ''}`;
   }
   // מייל ביטול סדנה: עם החזר (ומסמך זיכוי) או בלי
   // נשלח רק אחרי ההחלטה של תמימה: עם החזר ומסמך זיכוי, או "הסדנה בוטלה" בלי אזכור של החזר
   function wsCancelMail(w, refund) {
     email('wsCancelled', toCustomer(w), 'הסדנה בוטלה', [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה ב${longDay(w.date)}, ${w.time} בוטלה.`,
-      refund ? `ההחזר בוצע לכרטיס האשראי (${money(refund.amount)}). מסמך זיכוי מצורף.` : '',
+      refund ? `הוחזרו לך ${money(refund.amount)} (${REFUND_METHOD[refund.method]}). מסמך הזיכוי מצורף.` : '',
       'נשמח לקבוע מועד אחר.'].filter(Boolean), refund ? { extra: creditMailHtml(refund) } : {});
   }
+  // מייל זיכוי נשלח רק כשיש קובץ של מסמך הזיכוי מסאמיט
+  const refundMailable = r => !!(r && r.file);
   function creditMailHtml(r) {
     const row = (k, v) => `<tr><td style="padding:4px 0;color:#6c5f55;width:110px">${k}</td><td style="padding:4px 0">${v}</td></tr>`;
     return `<div style="margin:18px 0;border:1px solid #e6dccd;border-radius:12px;padding:16px;background:#fff" dir="rtl">
-      <div style="font-weight:bold;margin-bottom:8px">חשבונית מס קבלה זיכוי מס׳ ${r.creditNo}</div>
-      <table style="border-collapse:collapse;font-size:14px;width:100%">${row('תאריך', `${dmy(r.date)}.${parse(r.date).getFullYear()}`)}${row('פירוט', `זיכוי לחשבונית מס׳ ${r.invoice}`)}${row('סכום', `<b>−${money(r.amount)}</b>`)}${row('אמצעי', 'זיכוי לכרטיס האשראי (סאמיט)')}</table></div>`;
+      <div style="font-weight:bold;margin-bottom:8px">מסמך זיכוי${r.creditNo ? ` מס׳ ${r.creditNo}` : ''}</div>
+      <table style="border-collapse:collapse;font-size:14px;width:100%">${row('תאריך', fullDate(r.date))}${row('פירוט', `זיכוי לחשבונית מס׳ ${r.invoice}`)}${row('סכום', `<b>−${money(r.amount)}</b>`)}${row('אמצעי', REFUND_METHOD[r.method])}${row('קובץ', `${esc(r.file.name)} (מצורף)`)}</table></div>`;
   }
 
   /* ---------- זיכוי ממתין להחלטה ----------
@@ -716,7 +757,6 @@
     customerCancel: ['תמימה', 'ביטול סדנה מ"ההזמנה שלי"'],
     lateRequest: ['תמימה', 'פנייה מאוחרת לביטול'],
     privacyRequest: ['תמימה', 'בקשת עיון או מחיקה'],
-    refundFailed: ['תמימה', 'זיכוי נכשל'],
     leaveAlert: ['תמימה', 'הודעת עזיבה של סטודנט'],
     newLead: ['תמימה', 'פנייה חדשה לקורס'],
     conflict: ['תמימה', 'התנגשות ביומן'],
@@ -959,12 +999,13 @@
     flashClose() { ui.stuMsg = null; render(); },
     moreTab(d) { ui.moreTab = d.t; render(); },
     pdf(d) {
-      const r = d.credit && S.refunds.find(x => x.id === d.credit);
-      const no = r ? r.creditNo : Number(d.inv);
-      const html = r ? creditDocHtml(r) : docHtml(no);
+      const no = Number(d.inv);
+      const html = docHtml(no);
       if (!html) return;
-      if (!sumitPdf(no, html, r ? `חשבונית מס קבלה זיכוי ${no}` : `חשבונית מס קבלה ${no}`)) openSheet(() => html);
+      if (!sumitPdf(no, html, `חשבונית מס קבלה ${no}`)) openSheet(() => html);
     },
+    // זיכוי שנרשם: הפרטים, והקובץ של מסמך הזיכוי אם צורף
+    creditDoc(d) { const r = S.refunds.find(x => x.id === d.id); if (r) openSheet(() => creditDocHtml(r)); },
     chToggle(d) { ui.chOpen[d.id] = !ui.chOpen[d.id]; if (ui.chMsg && ui.chMsg.id === d.id) ui.chMsg = null; render(); ui.focusSel = `[data-act="chToggle"][data-id="${d.id}"]`; focusPending(); },
 
   };

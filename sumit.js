@@ -1,33 +1,38 @@
 /* sumit.js: חיבור מדומה לסאמיט (סליקה דרך Upay, כרטיס אשראי בלבד).
-   כל פעולות התשלום יוצאות מהמערכת. תמימה לא נכנסת לסאמיט.
+   כלל התשלום: כל תשלום נעשה בלחיצה של הלקוח, בדף התשלום של סאמיט. המערכת לא שומרת כרטיס ולא מחייבת לבד.
+   המערכת לא מבצעת זיכויים: תמימה מחזירה כסף בסאמיט או בביט, ורק רושמת את הזיכוי במערכת.
    כל קריאה נרשמת ב"מאחורי הקלעים" בשם ובפרמטרים של ה-API האמיתי, כדי שהמעבר לחיבור האמיתי יהיה החלפה של השכבה הזו בלבד. */
 'use strict';
 
-  const SUMIT_IPN = 'https://studio.example/api/sumit/ipn';   // כתובת השרת שמקבל את הודעות התשלום (IPN)
+  const SUMIT_IPN = 'https://studio.example/api/sumit/ipn';        // הודעת שרת (IPN) אחרי תשלום מוצלח
+  const SUMIT_RETURN = 'https://studio.example/payment-return';     // לכאן הלקוח חוזר, עם og-paymentid ושאר הפרמטרים
   const sumitLog = (title, method, path, params) => log('sumit', title, `${method} ${path}${params ? '\n' + JSON.stringify(params) : ''}`);
-  const sumitCustomer = c => ({ Name: c.name, Phone: c.phone || '', EmailAddress: c.email || '' });
-  const newToken = () => `tok_${token().slice(0, 12)}`;
+  // פרטי הלקוח לסאמיט. לקוח שכבר שילם בעבר נשלח עם המזהה שלו בסאמיט, כדי שהקבלה תירשם על אותו כרטיס
+  const sumitCustomer = (c, sumitId) => Object.assign(sumitId ? { ID: sumitId } : {}, { Name: c.name, Phone: c.phone || '', EmailAddress: c.email || '' });
 
-  // תשלומים שסאמיט קיבל (בגרסה האמיתית: נשמרים אצל סאמיט, והמערכת שואלת עליהם)
-  function sumitStore() { if (!S.sumit) S.sumit = { payments: {}, failNextRefund: false }; return S.sumit; }
+  // תשלומים ומסמכים שסאמיט מחזיק (בגרסה האמיתית: אצל סאמיט, והמערכת שואלת עליהם)
+  function sumitStore() { if (!S.sumit) S.sumit = { payments: {}, nextCustomer: 100001, nextDocId: 900001 }; return S.sumit; }
+  const newSumitCustomer = () => `C${sumitStore().nextCustomer++}`;
 
   /* דף תשלום: /billing/payments/beginredirect/
-     סאמיט מחזיר כתובת לדף התשלום המאובטח. אחרי תשלום הוא מפיק חשבונית מס קבלה, שומר טוקן של הכרטיס ושולח IPN לכתובת שלנו. */
+     order: { id (המזהה החיצוני שלנו), customer, sumitId, amount, desc } */
   function sumitBeginRedirect(order) {
     sumitLog('סאמיט: נוצר דף תשלום', 'POST', '/billing/payments/beginredirect/', {
-      Customer: sumitCustomer(order.customer), Items: [{ Item: { Name: order.desc }, Quantity: 1, UnitPrice: order.amount }],
-      VATIncluded: true, DocumentType: 'InvoiceAndReceipt', SaveCreditCard: true, ExternalIdentifier: order.id, IPNURL: SUMIT_IPN
+      Customer: sumitCustomer(order.customer, order.sumitId), Items: [{ Item: { Name: order.desc }, Quantity: 1, UnitPrice: order.amount }],
+      VATIncluded: true, DocumentType: 'InvoiceAndReceipt', ExternalIdentifier: order.id, RedirectURL: SUMIT_RETURN, IPNURL: SUMIT_IPN
     });
     return { RedirectURL: `https://pay.sumit.co.il/${order.id}` };
   }
 
-  // הלקוח שילם בדף של סאמיט (בדמו: הכפתור במסך התשלום המדומה)
+  /* הלקוח שילם בדף של סאמיט (בדמו: הכפתור במסך התשלום המדומה).
+     סאמיט מפיק חשבונית מס קבלה, שולח הודעת שרת (IPN), ומחזיר את הלקוח לאתר עם הפרמטרים. מחזיר את הפרמטרים של החזרה */
   function sumitCustomerPaid(order) {
     const st = sumitStore();
     const id = `pay_${token().slice(0, 10)}`;
-    st.payments[id] = { id, ref: order.id, amount: order.amount, valid: true, doc: S.nextInvoice++, token: newToken(), customerId: `C${100000 + Math.floor(Math.random() * 899999)}` };
-    log('sumit', `סאמיט: התקבל תשלום ${money(order.amount)}`, `חשבונית מס קבלה מס׳ ${st.payments[id].doc} הופקה, והטוקן של הכרטיס נשמר. סאמיט שולח למערכת הודעת שרת (IPN).`);
-    return id;
+    const p = { id, ref: order.id, amount: order.amount, valid: true, doc: S.nextInvoice++, docId: st.nextDocId++, customerId: order.sumitId || newSumitCustomer() };
+    st.payments[id] = p;
+    log('sumit', `סאמיט: התקבל תשלום ${money(order.amount)}`, `חשבונית מס קבלה מס׳ ${p.doc} הופקה. סאמיט שולח למערכת הודעת שרת (IPN), ומחזיר את הלקוח לאתר.`);
+    return { 'og-paymentid': id, 'og-customerid': p.customerId, 'og-documentnumber': p.doc, 'og-externalidentifier': order.id, 'og-paymenttype': 'CreditCard' };
   }
   // תשלום שנכשל או בוטל בדף של סאמיט: אין הודעת שרת, וההזמנה נשארת "ממתין לתשלום"
   function sumitCustomerFailed(order) {
@@ -37,14 +42,17 @@
   function sumitGetPayment(id) {
     sumitLog('סאמיט: אימות התשלום', 'POST', '/billing/payments/get/', { PaymentID: id });
     const p = sumitStore().payments[id];
-    return p ? { ValidPayment: p.valid, Amount: p.amount, DocumentNumber: p.doc, PaymentMethod: { CreditCard_Token: p.token }, CustomerID: p.customerId, ExternalIdentifier: p.ref } : null;
+    return p ? { PaymentID: p.id, ValidPayment: p.valid, Amount: p.amount, DocumentNumber: p.doc, DocumentID: p.docId, CustomerID: p.customerId, ExternalIdentifier: p.ref } : null;
   }
 
-  // מסמך מתוך המערכת (קבלה לסדנה מ"בסלון"): /accounting/documents/create/
-  function sumitCreateDocument(customer, desc, amount) {
-    const doc = S.nextInvoice++;
-    sumitLog(`סאמיט: הופקה חשבונית מס קבלה מס׳ ${doc}`, 'POST', '/accounting/documents/create/', {
-      Details: { Type: 'InvoiceAndReceipt', Customer: sumitCustomer(customer) }, Items: [{ Item: { Name: desc }, Quantity: 1, UnitPrice: amount }], VATIncluded: true
+  /* מסמך מתוך המערכת (קבלה לסדנה מערוץ שיווק): /accounting/documents/create/
+     אין כאן חיוב. רק מסמך, עם אמצעי התשלום שהוגדר לערוץ. מחזיר מזהה מסמך, מספר מסמך ומזהה לקוח */
+  function sumitCreateDocument(customer, sumitId, desc, amount, payLabel) {
+    const st = sumitStore();
+    const doc = { DocumentID: st.nextDocId++, DocumentNumber: S.nextInvoice++, CustomerID: sumitId || newSumitCustomer() };
+    sumitLog(`סאמיט: הופקה חשבונית מס קבלה מס׳ ${doc.DocumentNumber}`, 'POST', '/accounting/documents/create/', {
+      Details: { Type: 'InvoiceAndReceipt', Customer: sumitCustomer(customer, sumitId) }, Items: [{ Item: { Name: desc }, Quantity: 1, UnitPrice: amount }],
+      Payments: [{ Amount: amount, Details: payLabel }], VATIncluded: true
     });
     return doc;
   }
@@ -58,19 +66,4 @@
     const win = window.open('', '_blank');
     if (win) { win.document.write(page); win.document.close(); return true; }
     return false;
-  }
-
-  /* זיכוי: קריאה אחת ל-/billing/payments/charge/ עם סכום שלילי.
-     מחזירה את הכסף לכרטיס ומפיקה חשבונית מס קבלה זיכוי.
-     זו הפונקציה היחידה שמבצעת זיכוי, והיא נקראת רק מהכפתור "ביצוע זיכוי" של תמימה. */
-  function sumitRefund(o) {
-    const st = sumitStore();
-    sumitLog(`סאמיט: זיכוי ${money(o.amount)} לחשבונית ${o.invoice}`, 'POST', '/billing/payments/charge/', {
-      Customer: sumitCustomer(o.customer), PaymentMethod: { CreditCard_Token: o.token || null },
-      Items: [{ Item: { Name: o.desc }, Quantity: 1, UnitPrice: -o.amount }], VATIncluded: true,
-      SupportCredit: true, DocumentType: 'CreditInvoiceAndReceipt', DocumentDescription: `זיכוי לחשבונית מס׳ ${o.invoice}`
-    });
-    if (st.failNextRefund) { st.failNextRefund = false; return { ok: false, error: 'סאמיט דחה את הזיכוי (הדגמת כשל).' }; }
-    if (!o.token) return { ok: false, error: 'אין כרטיס אשראי שמור לתשלום הזה, ולכן אי אפשר לזכות דרך סאמיט.' };
-    return { ok: true, creditNo: S.nextCredit++ };
   }

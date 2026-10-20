@@ -231,7 +231,8 @@
       if (s0.firstDue && !(ui.pol && ui.pol.ok)) { ui.stuMsg = 'כדי לשלם צריך לאשר את מדיניות הביטולים.'; render(); return; }
       if (s0.firstDue) s0.policy = { date: todayIso(), version: S.settings.policyVersion };
       const opens = isLocked(s0);
-      const inv = payCard(s0);
+      const inv = payCardOnline(s0);
+      if (!inv) { ui.stuMsg = 'לא הצלחנו לאמת את התשלום. אפשר לנסות שוב.'; render(); return; }
       ui.stuMsg = opens ? `התשלום התקבל, והאזור האישי פתוח. חשבונית מס קבלה מס׳ ${inv} והקישור האישי נשלחו למייל.` : `התשלום התקבל. חשבונית מס קבלה מס׳ ${inv} נשלחה למייל.`;
       location.hash = opens ? '#/student/home' : '#/student/payments'; flashClear();
     },
