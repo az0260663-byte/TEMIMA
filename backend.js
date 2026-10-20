@@ -15,6 +15,7 @@
   let saveT = null, inflight = null, retryMs = 2000, lastSig = '', lastSaveId = '', resave = false;
   const backendActive = () => BE.status !== 'off';
   const ID_OK = /^[\w.:@-]{1,200}$/;
+  const CHUNK_ROWS = 1000, CHUNK_BYTES = 3 * 1024 * 1024; // חלק אחד בשמירה גדולה
 
   // צורה קבועה להשוואה: אותו תוכן תמיד נותן אותה מחרוזת, בלי קשר לסדר המפתחות
   const canon = v => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map(key => [key, x[key]])) : x));
@@ -143,14 +144,24 @@
     inflight = (async () => {
       try {
         if (!keepalive && await syncRemote()) render();
-        const pairs = diff();
-        if (!pairs.length) { setSaving('saved'); return; }
-        const sig = canon(pairs);
-        // אותה שמירה בדיוק שנכשלה באמצע נשלחת שוב עם אותו מזהה, כדי שהשרת ישמור אותה פעם אחת
-        const saveId = sig === lastSig ? lastSaveId : newSaveId();
-        lastSig = sig; lastSaveId = saveId;
-        await call('POST', 'api/data/save', { saveId, changes: pairs.map(toChange) }, keepalive);
-        pairs.forEach(([k, s]) => { if (s === null) saved.delete(k); else saved.set(k, s); });
+        // שמירה גדולה (למשל אחרי חיבור יומן עם הרבה אירועים) נשלחת בחלקים, כל חלק נשמר בפני עצמו
+        for (let round = 0; round < 100; round++) {
+          const pairs = diff();
+          if (!pairs.length) break;
+          const chunk = [];
+          let size = 0;
+          for (const p of pairs) {
+            const len = p[0].length + (p[1] ? p[1].length : 4);
+            if (chunk.length && (chunk.length >= CHUNK_ROWS || size + len > CHUNK_BYTES)) break;
+            chunk.push(p); size += len;
+          }
+          const sig = canon(chunk);
+          // אותה שמירה בדיוק שנכשלה באמצע נשלחת שוב עם אותו מזהה, כדי שהשרת ישמור אותה פעם אחת
+          const saveId = sig === lastSig ? lastSaveId : newSaveId();
+          lastSig = sig; lastSaveId = saveId;
+          await call('POST', 'api/data/save', { saveId, changes: chunk.map(toChange) }, keepalive && size < 60000);
+          chunk.forEach(([k, s]) => { if (s === null) saved.delete(k); else saved.set(k, s); });
+        }
         retryMs = 2000;
         setSaving('saved');
       } catch (e) {
@@ -197,6 +208,7 @@
     BE.rev = d.rev || 0;
     BE.status = 'ready';
     BE.error = '';
+    BE.retry = false;
     runAutomations();
     render();
     await saveNow().catch(() => {});
@@ -219,6 +231,13 @@
     BE.resume = false;
     await load();
   }
+  // הטעינה נכשלה: כניסה שפגה מחזירה למסך הכניסה. תקלה אחרת (שרת לא זמין) מציעה ניסיון חוזר, בלי חלון גוגל
+  function loadFailed(e) {
+    BE.status = 'signin';
+    BE.retry = e.status !== 401;
+    BE.error = BE.retry ? `לא הצלחנו לטעון את הנתונים. ${e.message}` : '';
+    render();
+  }
   function backendBoot() {
     if (APP_MODE !== 'studio' || CFG.backend === 'demo') return false;
     BE.status = 'checking';
@@ -229,7 +248,7 @@
       BE.configured = !!st.configured;
       if (!st.connected) { BE.status = 'signin'; render(); return; }
       BE.account = st.account || '';
-      try { await load(); } catch (e) { BE.status = 'signin'; BE.error = e.status === 401 ? '' : e.message; render(); }
+      try { await load(); } catch (e) { loadFailed(e); }
     })();
     setInterval(() => { if (BE.status === 'ready') scheduleSave(0); }, 4000);
     setInterval(pull, 20000);
@@ -241,6 +260,12 @@
   const backendAfterRender = () => scheduleSave();
 
   Object.assign(A, {
+    async beRetry() {
+      if (BE.busy) return;
+      BE.busy = true; BE.error = ''; render();
+      try { await signedIn(); } catch (e) { loadFailed(e); } finally { BE.busy = false; }
+      if (BE.status !== 'ready') render();
+    },
     async beSignIn() {
       if (BE.busy) return;
       BE.error = ''; BE.busy = true; render();
@@ -250,7 +275,7 @@
       BE.busy = false;
       BE.account = GS.state().account || '';
       try { await signedIn(); }
-      catch (e) { BE.status = 'signin'; BE.error = e.message; render(); return; }
+      catch (e) { loadFailed(e); return; }
       // כניסה ראשונה במכשיר בלי יומן שנבחר: ממשיכים ישר לבחירת היומן
       if (GS.state().status === 'authorized') { ui.gsCals = cals; A.gsChoose(); }
     },
@@ -278,6 +303,10 @@
     if (BE.status === 'off' || BE.status === 'ready') return '';
     const wrap = inner => `<main id="main" tabindex="-1" class="be-screen"><div class="be-card"><span class="logo" aria-hidden="true">ת</span>${inner}</div></main>`;
     if (BE.status !== 'signin') return wrap('<h1>הסטודיו של תמימה</h1><p class="muted" role="status">טוען את הנתונים...</p>');
+    if (BE.retry) return wrap(`<h1>הסטודיו של תמימה</h1>
+      <p class="be-err" role="alert">${esc(BE.error)}</p>
+      <button class="btn primary" data-act="beRetry"${BE.busy ? ' disabled' : ''}>${BE.busy ? 'טוען...' : 'ניסיון חוזר'}</button>
+      <p class="muted small">הכניסה בתוקף. צריך רק לטעון שוב את הנתונים.</p>`);
     const can = BE.configured && GS && GS.available();
     return wrap(`<h1>כניסה לניהול</h1>
       <p>נכנסים עם חשבון הגוגל של הסטודיו. בכל מכשיר נכנסים פעם אחת, ומאז הכניסה נשמרת.</p>
