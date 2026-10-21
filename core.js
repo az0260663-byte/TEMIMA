@@ -295,13 +295,13 @@
     if (Number(p.Amount) !== Number(w.amount)) return reject(`הסכום בסאמיט (${money(p.Amount)}) שונה מהסכום בהזמנה (${money(w.amount)}).`);
     return confirmWorkshop(w, p, via);
   }
-  const VIA = { ipn: 'הודעת שרת מסאמיט', return: 'החזרה לאתר', check: 'בדיקה מול הסליקה', fixed: 'הלקוח לחץ "שילמתי" (קישור קבוע, לא אומת)' };
+  const VIA = { ipn: 'הודעת שרת מסאמיט', return: 'החזרה לאתר', check: 'בדיקה מול הסליקה' };
   function confirmCard(s, p, via) {
     if (Number(p.Amount) !== Number(s.payOrder.amount)) { log('sumit', 'אישור תשלום נדחה', `הסכום בסאמיט שונה מהסכום שנדרש מ${s.name}.`); return { result: 'rejected' }; }
     addSumitId(s, p.CustomerID);
-    payCard(s, { invoice: p.DocumentNumber, docId: p.DocumentID, paymentId: p.PaymentID, orderId: p.ExternalIdentifier, receiptUrl: p.ReceiptUrl, unverified: p.Unverified });
+    payCard(s, { invoice: p.DocumentNumber, docId: p.DocumentID, paymentId: p.PaymentID, orderId: p.ExternalIdentifier, receiptUrl: p.ReceiptUrl });
     s.payOrder = null;
-    log('sumit', p.Unverified ? VIA[via] : `${VIA[via]}: התשלום אומת`, p.Unverified ? `${s.name}, כרטיסייה, ${money(p.Amount)}. נרשם כ"לא אומת": תמימה צריכה לבדוק בסליקה שהתשלום התקבל.` : `${s.name}, כרטיסייה. חשבונית מס קבלה מס׳ ${p.DocumentNumber} נשמרה.`);
+    log('sumit', `${VIA[via]}: התשלום אומת`, `${s.name}, כרטיסייה. חשבונית מס קבלה מס׳ ${p.DocumentNumber} נשמרה.`);
     return { result: 'confirmed', s };
   }
   function confirmWorkshop(w, p, via) {
@@ -309,7 +309,7 @@
     delete w.holdUntil;
     const removed = bookWorkshop(w);
     addSumitId(customerOf(w), p.CustomerID);
-    log('sumit', p.Unverified ? `${VIA[via]}` : `${VIA[via]}: התשלום אומת`, p.Unverified ? `ההזמנה סומנה "שולמה, לא אומתה". תמימה צריכה לבדוק בסליקה שהתשלום של ${w.customer.name} (${money(w.amount)}) התקבל.` : `ההזמנה סומנה "שולם". חשבונית מס קבלה מס׳ ${w.invoice} נשמרה בכרטיס הלקוח של ${w.customer.name}.`);
+    log('sumit', `${VIA[via]}: התשלום אומת`, `ההזמנה סומנה "שולם". חשבונית מס קבלה מס׳ ${w.invoice} נשמרה בכרטיס הלקוח של ${w.customer.name}.`);
     // רק משבצות של ערוצים אחרים (לא של האתר עצמו) נזכרות כאן
     const others = [...new Set(removed.filter(x => x.channel !== HOME).map(x => chName(x.channel)))];
     log('sync', 'היומן עודכן', `המשבצת ${shortDay(w.date)} ${w.time} נסגרה ולא תוצע יותר באתר${others.length ? `, וגם הוסרה מיומן ${others.map(n => `"${n}"`).join(' ומיומן ')}` : ''}.`);
@@ -501,14 +501,12 @@
   }
   /* כרטיסייה ששולמה. o: מה שסאמיט החזיר אחרי אימות (invoice, docId, paymentId, orderId), או { manual: true } לתשלום שתמימה רושמת */
   function payCard(s, o = {}) {
-    // תשלום בקישור קבוע (לא אומת): אין עדיין מספר קבלה. הקבלה נשלחת ממערכת הסליקה
-    const inv = o.unverified ? null : (o.invoice || S.nextInvoice++);
+    const inv = o.invoice || S.nextInvoice++;
     const opens = isLocked(s);                              // התשלום הראשון פותח את האזור האישי
-    S.payments.push(Object.assign({ id: uid('p'), studentId: s.id, date: todayIso(), amount: S.settings.cardPrice, invoice: inv, docId: o.docId || null, paymentId: o.paymentId || null, orderId: o.orderId || null, manual: !!o.manual }, o.receiptUrl ? { receiptUrl: o.receiptUrl } : {}, o.unverified ? { unverified: true } : {}));
+    S.payments.push(Object.assign({ id: uid('p'), studentId: s.id, date: todayIso(), amount: S.settings.cardPrice, invoice: inv, docId: o.docId || null, paymentId: o.paymentId || null, orderId: o.orderId || null, manual: !!o.manual }, o.receiptUrl ? { receiptUrl: o.receiptUrl } : {}));
     if (s.owes) { s.owes = false; s.firstDue = false; s.requestSent = false; s.reminded = null; } else s.nextPaid = true;
     if (o.manual) log('sumit', `תשלום נרשם ידנית: ${s.name}`, `${money(S.settings.cardPrice)}, חשבונית מס קבלה מס׳ ${inv}.`);
-    if (o.unverified) email('payReceipt', toStudent(s), 'התשלום על הכרטיסייה נרשם', [`היי ${first(s)},`, `התשלום על הכרטיסייה (${money(S.settings.cardPrice)}) נרשם. תודה!`, 'הקבלה נשלחת בנפרד ממערכת הסליקה.'].concat(opens ? ['מעכשיו האזור האישי שלך פתוח: השיעורים, הכרטיסייה, ההשלמות והתשלומים. זה הקישור האישי שלך, כדאי לשמור אותו.'] : []), { cta: opens ? ['לאזור האישי שלי', studentUrl(s, 'home')] : ['לתשלומים שלי', studentUrl(s, 'payments')] });
-    else email('payReceipt', toStudent(s), `התשלום התקבל, חשבונית מס קבלה מס׳ ${inv}`, [`היי ${first(s)},`, `קיבלנו את התשלום על הכרטיסייה (${money(S.settings.cardPrice)}). תודה!`, `חשבונית מס קבלה מס׳ ${inv} מצורפת ונשמרת גם באפליקציה.`].concat(opens ? ['מעכשיו האזור האישי שלך פתוח: השיעורים, הכרטיסייה, ההשלמות והתשלומים. זה הקישור האישי שלך, כדאי לשמור אותו.'] : []), { extra: typeof receiptLinkHtml === 'function' ? receiptLinkHtml(o.receiptUrl) : '', cta: opens ? ['לאזור האישי שלי', studentUrl(s, 'home')] : ['לתשלומים שלי', studentUrl(s, 'payments')] });
+    email('payReceipt', toStudent(s), `התשלום התקבל, חשבונית מס קבלה מס׳ ${inv}`, [`היי ${first(s)},`, `קיבלנו את התשלום על הכרטיסייה (${money(S.settings.cardPrice)}). תודה!`, `חשבונית מס קבלה מס׳ ${inv} מצורפת ונשמרת גם באפליקציה.`].concat(opens ? ['מעכשיו האזור האישי שלך פתוח: השיעורים, הכרטיסייה, ההשלמות והתשלומים. זה הקישור האישי שלך, כדאי לשמור אותו.'] : []), { extra: typeof receiptLinkHtml === 'function' ? receiptLinkHtml(o.receiptUrl) : '', cta: opens ? ['לאזור האישי שלי', studentUrl(s, 'home')] : ['לתשלומים שלי', studentUrl(s, 'payments')] });
     return inv;
   }
 

@@ -42,7 +42,7 @@
   function sumitGetPayment(id) {
     if (!PAY.live) sumitLog('סאמיט: אימות התשלום', 'POST', '/billing/payments/get/', { PaymentID: id });
     const p = sumitStore().payments[id];
-    return p ? { PaymentID: p.id, ValidPayment: p.valid, Amount: p.amount, DocumentNumber: p.doc, DocumentID: p.docId, CustomerID: p.customerId, ExternalIdentifier: p.ref, ReceiptUrl: p.receiptUrl || '', Unverified: !!p.unverified } : null;
+    return p ? { PaymentID: p.id, ValidPayment: p.valid, Amount: p.amount, DocumentNumber: p.doc, DocumentID: p.docId, CustomerID: p.customerId, ExternalIdentifier: p.ref, ReceiptUrl: p.receiptUrl || '' } : null;
   }
 
   /* מסמך מתוך המערכת (קבלה לסדנה מערוץ שיווק): /accounting/documents/create/
@@ -89,7 +89,7 @@
     const win = window.open('', '_blank');
     Object.assign(live, { ref: order.id, url: '', popup: !!win, error: '', since: Date.now(), amount: order.amount, desc: order.desc });
     log('sumit', `${PAY_PROVIDER[PAY.provider] || 'סליקה'}: נפתח דף תשלום אמיתי`, `${order.desc}, ${money(order.amount)}. מזהה ההזמנה: ${order.id}.`);
-    return payPost('start', { ref: order.id, kind, n, desc: order.desc, client: { name: order.customer.name, email: order.customer.email, phone: order.customer.phone } })
+    return payPost('start', { ref: order.id, kind, n, desc: order.desc, coupon: order.coupon || '', client: { name: order.customer.name, email: order.customer.email, phone: order.customer.phone } })
       .then(d => { live.url = d.url; if (win) { try { win.opener = null; } catch (e) { /* לא נתמך */ } win.location.href = d.url; } return d; })
       .catch(e => { if (win) win.close(); live.error = e.message; throw e; });
   }

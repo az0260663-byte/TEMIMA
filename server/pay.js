@@ -23,6 +23,12 @@ const BASE = {
 // מחירי בדיקה: זוג 2 ₪, כל משתתף נוסף 1 ₪, כרטיסייה 4 ₪. כך רואים שהסכום משתנה לפי ההזמנה, בלי לשלם הרבה
 const TEST_PRICES = { price2: 2, pricePer: 1, cardPrice: 4 };
 const DOC_TYPE = 320; // חשבונית מס / קבלה
+// קופונים (כרגע רק לבדיקה). השרת מחשב את ההנחה בעצמו, ולא סומך על סכום מהדפדפן. לפחות 1 ₪ לתשלום
+const COUPONS = { TEST679: 679 };
+function withCoupon(amount, code) {
+  const off = COUPONS[String(code || '').trim().toUpperCase()];
+  return off ? Math.max(1, amount - off) : amount;
+}
 
 function amountFor(kind, n, prices = TEST_PRICES) {
   if (kind === 'card') return prices.cardPrice;
@@ -77,8 +83,10 @@ function payRoutes(opts = {}) {
       const ref = String(b.ref || '');
       if (!/^[\w-]{4,60}$/.test(ref)) return [400, { error: 'מזהה הזמנה לא תקין.' }];
       const kind = b.kind === 'card' ? 'card' : b.kind === 'workshop' ? 'workshop' : '';
-      const amount = amountFor(kind, Number(b.n));
-      if (!amount) return [400, { error: 'סוג ההזמנה או מספר המשתתפים לא תקינים.' }];
+      const base = amountFor(kind, Number(b.n));
+      if (!base) return [400, { error: 'סוג ההזמנה או מספר המשתתפים לא תקינים.' }];
+      if (b.coupon && (kind !== 'workshop' || !COUPONS[String(b.coupon).trim().toUpperCase()])) return [400, { error: 'הקופון לא תקין.' }];
+      const amount = kind === 'workshop' ? withCoupon(base, b.coupon) : base;
       const c = b.client || {};
       const name = clean(c.name, 80), email = clean(c.email, 120), phone = clean(c.phone, 30);
       if (!name) return [400, { error: 'חסר שם.' }];
@@ -122,4 +130,4 @@ function payRoutes(opts = {}) {
   return { routes, live };
 }
 
-module.exports = { payRoutes, amountFor, TEST_PRICES };
+module.exports = { payRoutes, amountFor, withCoupon, TEST_PRICES };

@@ -1454,7 +1454,7 @@
     return `<button class="ws-row" data-act="wsSheet" data-id="${w.id}">
       <span class="dot dot-${srcCss(w)}"></span>
       <div><b>${relDay(w.date)} ${w.time}</b><small>${esc(w.customer.name)} · ${w.n} משתתפים · ${money(w.amount)}</small>
-      <span class="srow-meta">${chip(isOwn(w) ? 'אתר' : chName(w.source), srcCss(w))}${chip(paidLabel(w), 'muted')}${w.unverified ? chip('תשלום לא אומת', 'requested') : rc}${past && !w.feedbackSent ? chip('משוב לא נשלח', 'requested') : ''}</span></div>
+      <span class="srow-meta">${chip(isOwn(w) ? 'אתר' : chName(w.source), srcCss(w))}${chip(paidLabel(w), 'muted')}${rc}${past && !w.feedbackSent ? chip('משוב לא נשלח', 'requested') : ''}</span></div>
     </button>`;
   }
   function tWorkshops() {
@@ -1510,7 +1510,7 @@
         <div><b>${longDay(w.date)}, ${w.time}</b><small>${w.n} משתתפים · ${money(w.amount)} · ${isOwn(w) ? 'מהאתר' : esc(chName(w.source))}</small></div>${w.status === 'cancelled' ? chip('בוטלה', 'muted') : ''}</button>`).join('') || empty('אין הזמנות.')}
       <h3>חשבוניות</h3>${inv.map(w => `<div class="pay-row"><span>חשבונית מס קבלה מס׳ ${w.invoice} · ${money(w.amount)} · ${shortDay(w.date)}</span>
         <div class="btn-row">${pdfBtn(w.invoice)}${isOwn(w) && refundable(w.invoice) ? `<button class="btn ghost small" data-act="refundOpen" data-inv="${w.invoice}">זיכוי</button>` : ''}</div>${refundLines(w.invoice)}</div>`).join('')}
-        ${stu ? S.payments.filter(p => p.studentId === stu.id).map(p => p.unverified ? `<div class="pay-row"><span>${money(p.amount)} · כרטיסייה · ${shortDay(p.date)}</span>${chip('תשלום לא אומת: לבדוק בסליקה', 'requested')}</div>` : `<div class="pay-row"><span>חשבונית מס קבלה מס׳ ${p.invoice} · ${money(p.amount)} · כרטיסייה · ${shortDay(p.date)}</span>
+        ${stu ? S.payments.filter(p => p.studentId === stu.id).map(p => `<div class="pay-row"><span>חשבונית מס קבלה מס׳ ${p.invoice} · ${money(p.amount)} · כרטיסייה · ${shortDay(p.date)}</span>
         <div class="btn-row">${pdfBtn(p.invoice)}${refundable(p.invoice) ? `<button class="btn ghost small" data-act="refundOpen" data-inv="${p.invoice}">זיכוי</button>` : ''}</div>${refundLines(p.invoice)}</div>`).join('') : ''}
         ${inv.length || (stu && S.payments.some(p => p.studentId === stu.id)) ? '' : empty('אין חשבוניות עדיין.')}
       ${(S.customers || []).length > 1 && !c.anonymizedAt ? `<button class="btn ghost block" data-act="custMergePick" data-id="${c.id}">איחוד עם לקוח אחר</button>` : ''}
@@ -1652,7 +1652,7 @@
       ${needs ? `<button class="btn ${s.reminded ? 'ghost' : 'primary'} block" data-act="remind" data-id="${s.id}">${s.reminded ? 'תזכורת נשלחה, לשלוח שוב' : 'שליחת תזכורת לתשלום'}</button>` : ''}
       ${needs && ui.guided ? `<button class="btn demo block" data-act="simPay" data-id="${s.id}">הדגמה: תשלום בקישור</button>` : ''}
       <h3>תשלומים אחרונים</h3>
-      ${hist.map(p => `<div class="ws-row"><span class="dot dot-paid"></span><div><b>${money(p.amount)}</b><small>${dmy(p.date)} · ${p.unverified ? 'תשלום לא אומת: לבדוק בסליקה' : `חשבונית מס קבלה מס׳ ${p.invoice}`}</small></div></div>`).join('')}`;
+      ${hist.map(p => `<div class="ws-row"><span class="dot dot-paid"></span><div><b>${money(p.amount)}</b><small>${dmy(p.date)} · חשבונית מס קבלה מס׳ ${p.invoice}</small></div></div>`).join('')}`;
   }
 
   function workshopSheetHtml(id) {

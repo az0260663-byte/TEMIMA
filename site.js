@@ -192,9 +192,7 @@
   }
 
   // ספירה לאחור של המועד השמור במסך התשלום. כשהזמן נגמר, המועד משתחרר
-  // קישור תשלום קבוע (בדיקה), רק כשאין חיבור אמיתי לסליקה
-  const fixedLink = () => (!PAY.live && CFG.fixedPayLink) || '';
-  // קופון שהופעל, והסכום אחריו (לפחות 1 ₪)
+  // קופון שהופעל, והסכום אחריו (לפחות 1 ₪). בסליקה האמיתית השרת מחשב את אותו סכום בעצמו
   const bkCoupon = () => (bk.coupon && (S.settings.coupons || []).find(c => c.code === bk.coupon)) || null;
   const bkTotal = () => { const c = bkCoupon(), p = price(bk.n); return c ? Math.max(1, p - c.off) : p; };
   const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -203,8 +201,7 @@
     if (holdTimer) return;
     holdTimer = setInterval(() => {
       const h = pendingOrder(bk.hold);
-      const paying = bk.step === 'pay' || bk.step === 'fixedpay';
-      if (!paying || route().page !== 'workshop') { clearInterval(holdTimer); holdTimer = null; if (paying && !h) A.bkExpire(); return; }
+      if (bk.step !== 'pay' || route().page !== 'workshop') { clearInterval(holdTimer); holdTimer = null; if (bk.step === 'pay' && !h) A.bkExpire(); return; }
       if (!h) { clearInterval(holdTimer); holdTimer = null; livePollStop(); bk.live = null; A.bkExpire(); return; }
       // בזמן שהלקוח משלם בלשונית של הסליקה, המועד ממשיך להישמר לו (עד 15 דקות, ואז הבדיקה נעצרת)
       if (bk.live && !bk.live.error) touchHold(h.id);
@@ -269,33 +266,19 @@
           <dt>שם</dt><dd>${esc(bk.name)}</dd>
           <dt>מיקום</dt><dd>${esc(S.content.address)}</dd>
           <dt>סכום</dt><dd>${bkCoupon() ? `<s>${money(price(bk.n))}</s>` : `<b>${money(price(bk.n))}</b>`}</dd>
-          ${bkCoupon() ? `<dt>קופון ${esc(bkCoupon().code)}</dt><dd>${money(-Math.min(bkCoupon().off, price(bk.n) - 1))}</dd><dt>לתשלום</dt><dd><b>${money(bkTotal())}</b></dd>` : ''}
+          ${bkCoupon() ? `<dt>קופון ${esc(bkCoupon().code)}</dt><dd>${money(bkTotal() - price(bk.n))}</dd><dt>לתשלום</dt><dd><b>${money(bkTotal())}</b></dd>` : ''}
         </dl>
-        ${PAY.live ? '' : `<div class="coupon-row"><label class="field"><span>קוד קופון</span><input class="txt" dir="ltr" data-bind="bk.couponIn" value="${esc(bk.couponIn || '')}" autocomplete="off"></label><button class="btn ghost small" data-act="bkCouponApply">${bkCoupon() ? 'החלפה' : 'הפעלה'}</button></div>${bk.couponMsg ? `<p class="${bk.couponOk ? 'ok-line small' : 'err'}" role="status">${esc(bk.couponMsg)}</p>` : ''}`}
+        <div class="coupon-row"><label class="field"><span>קוד קופון</span><input class="txt" dir="ltr" data-bind="bk.couponIn" value="${esc(bk.couponIn || '')}" autocomplete="off"></label><button class="btn ghost small" data-act="bkCouponApply">${bkCoupon() ? 'החלפה' : 'הפעלה'}</button></div>${bk.couponMsg ? `<p class="${bk.couponOk ? 'ok-line small' : 'err'}" role="status">${esc(bk.couponMsg)}</p>` : ''}
         <div class="policy">ביטול או שינוי מועד עד ${S.settings.workshopCancelHours} שעות לפני הסדנה. ביטול מאוחר יותר אינו כולל החזר.</div>
         ${err}
-        ${fixedLink() ? `<a class="btn primary block" href="${esc(fixedLink())}" target="_blank" rel="noopener" data-act="bkToPay">לתשלום ${money(bkTotal())}</a>` : '<button class="btn primary block" data-act="bkToPay">לתשלום</button>'}
+        <button class="btn primary block" data-act="bkToPay">לתשלום ${money(bkTotal())}</button>
         <button class="btn ghost block" data-act="bkGo" data-s="details">חזרה</button>`);
     }
 
     if (bk.step === 'pay') {
       const h = pendingOrder(bk.hold);
       body = (h ? `<p class="hold-note">ההזמנה ממתינה לתשלום. המועד שמור לכם עוד <b id="hold-left">${mmss(h.holdUntil - now().getTime())}</b> דקות</p>` : '') + err
-        + (bk.live ? liveWaitView(bk.live, 'bkPayBack') : sumitView(price(bk.n), `סדנת היכרות, ${bk.n} משתתפים, ${shortDay(bk.date)} ${bk.time}`, 'bkPay', 'bkPayBack', 'bkPayFail'));
-      startHoldTimer();
-    }
-    // קישור תשלום קבוע: הלקוח משלם בלשונית אחרת ומקליד את הסכום. המערכת לא מקבלת אישור, ולכן "שילמתי"
-    if (bk.step === 'fixedpay') {
-      const h = pendingOrder(bk.hold);
-      body = (h ? `<p class="hold-note">ההזמנה ממתינה לתשלום. המועד שמור לכם עוד <b id="hold-left">${mmss(h.holdUntil - now().getTime())}</b> דקות</p>` : '') + err + `<div class="sumit live-pay">
-        <div class="sumit-head"><div><b>תשלום מאובטח</b><small>בדף של מורנינג</small></div><span class="demo-badge">בדיקה: קישור תשלום קבוע</span></div>
-        <div class="sumit-amount"><small>בדף התשלום מקלידים את הסכום</small><b>${money(h ? h.amount : bkTotal())}</b></div>
-        <p class="hint">דף התשלום נפתח בלשונית חדשה. אחרי התשלום חוזרים לכאן ולוחצים "שילמתי".</p>
-        <a class="btn ghost block" href="${esc(fixedLink())}" target="_blank" rel="noopener">לפתיחת דף התשלום שוב</a>
-        <button class="btn primary block" data-act="bkFixedPaid">שילמתי</button>
-        <button class="btn ghost block" data-act="bkPayBack">חזרה</button>
-        <p class="muted small">בבדיקה הזו המערכת לא יודעת לבד שהתשלום עבר. ההזמנה תישמר כ"שולמה, לא אומתה", ותמימה תבדוק את התשלום במורנינג.</p>
-      </div>`;
+        + (bk.live ? liveWaitView(bk.live, 'bkPayBack') : sumitView(h ? h.amount : bkTotal(), `סדנת היכרות, ${bk.n} משתתפים, ${shortDay(bk.date)} ${bk.time}`, 'bkPay', 'bkPayBack', 'bkPayFail'));
       startHoldTimer();
     }
     if (bk.step === 'confirming') body = card(`<div class="confirming" role="status"><span class="spin" aria-hidden="true"></span><h2>מאשרים את התשלום</h2><p class="muted">רגע, ההזמנה נסגרת.</p></div>`);
@@ -304,7 +287,7 @@
       const w = workshop(bk.done);
       body = card(`<div class="done-ic">✓</div>
         <h1 class="center">ההזמנה אושרה</h1>
-        <p class="center">${w.unverified ? 'אישור ההזמנה נשלח' : 'אישור ההזמנה והקבלה נשלחו'} למייל <b>${esc(w.customer.email)}</b>.</p>
+        <p class="center">אישור ההזמנה והקבלה נשלחו למייל <b>${esc(w.customer.email)}</b>.</p>
         <dl class="kv">
           <dt>תאריך</dt><dd>${longDay(w.date)}</dd>
           <dt>שעה</dt><dd>${w.time} עד ${endOf(w.time)}</dd>
@@ -424,15 +407,10 @@
       if (!w) return A.bkExpire();
       Object.assign(w.customer, { name: bk.name.trim(), phone: bk.phone.trim(), email: bk.email.trim() });
       touchHold(w.id);
-      // קופון: הסכום של ההזמנה עצמה משתנה, כך שהקבלה, המיילים וכרטיס הלקוח מראים את מה ששולם
-      if (!PAY.live) { const c = bkCoupon(); w.amount = bkTotal(); if (c) w.coupon = { code: c.code, off: price(w.n) - w.amount }; else delete w.coupon; }
-      if (fixedLink()) {
-        if (!stillBookable(w)) { expireOrder(w.id, true); bk.hold = null; bk.step = 'slot'; bk.time = null; bk.err = 'המועד כבר לא זמין, ולא בוצע חיוב. בחרו מועד אחר.'; render(); scrollTop(); return; }
-        log('sumit', 'מורנינג: נפתח קישור תשלום קבוע', `${wsDesc(w)}, ${money(w.amount)}. בקישור קבוע הלקוח מקליד את הסכום, והמערכת לא מקבלת אישור על התשלום.`);
-        bk.err = ''; bk.step = 'fixedpay';
-        render(); scrollTop();
-        return;
-      }
+      // קופון: הסכום של ההזמנה עצמה משתנה, כך שהסליקה, הקבלה, המיילים וכרטיס הלקוח מראים את מה ששולם
+      const cp = bkCoupon();
+      w.amount = bkTotal();
+      if (cp) w.coupon = { code: cp.code, off: price(w.n) - w.amount }; else delete w.coupon;
       // לקוח מוכר (לפי טלפון) נשלח עם המזהה שלו בסאמיט, כדי שהקבלה תירשם על אותו כרטיס
       const known = (S.customers || []).find(k => k.phones.includes(normPhone(w.customer.phone)));
       // סליקה אמיתית: דף תשלום להזמנה הזו נפתח בלשונית חדשה, וההזמנה מתעדכנת לבד כשהתשלום מאומת
@@ -440,7 +418,7 @@
         if (!stillBookable(w)) { expireOrder(w.id, true); bk.hold = null; bk.step = 'slot'; bk.time = null; bk.err = 'המועד כבר לא זמין, ולא בוצע חיוב. בחרו מועד אחר.'; render(); scrollTop(); return; }
         bk.live = {};
         bk.err = ''; bk.step = 'pay';
-        livePayStart({ id: w.id, customer: w.customer, amount: w.amount, desc: wsDesc(w) }, 'workshop', w.n, bk.live)
+        livePayStart({ id: w.id, customer: w.customer, amount: w.amount, desc: wsDesc(w), coupon: cp ? cp.code : '' }, 'workshop', w.n, bk.live)
           .then(() => { render(); livePoll(bk.live, id => { touchHold(w.id); A.bkFinish(id, ['check']); }, () => { touchHold(w.id); render(); }); })
           .catch(() => render());
         render(); scrollTop();
@@ -457,15 +435,6 @@
       else if (!c) { bk.couponOk = false; bk.couponMsg = 'הקוד לא תקין.'; }
       else { bk.coupon = c.code; bk.couponIn = c.code; bk.couponOk = true; bk.couponMsg = `הקופון הופעל. לתשלום: ${money(bkTotal())}.`; }
       render();
-    },
-    // "שילמתי" בקישור הקבוע: ההזמנה נסגרת, אבל מסומנת "לא אומתה" עד שתמימה תבדוק במורנינג
-    bkFixedPaid() {
-      const w = pendingOrder(bk.hold);
-      if (!w) return A.bkExpire();
-      const id = `fix_${token().slice(0, 10)}`;
-      sumitStore().payments[id] = { id, ref: w.id, amount: w.amount, valid: true, doc: null, docId: null, customerId: '', unverified: true };
-      w.unverified = true;
-      A.bkFinish(id, ['fixed']);
     },
     bkPayBack() { livePollStop(); bk.live = null; bk.err = ''; bk.step = 'summary'; render(); },
     // עברו 10 דקות בלי פעילות: ההזמנה פגה, המועד משתחרר, והלקוח חוזר לבחירת מועד
@@ -511,8 +480,8 @@
         if (!w) { bk.step = 'pay'; bk.err = 'לא הצלחנו לאמת את התשלום. אפשר לנסות שוב.'; render(); return; }
         bk.live = null;
         bk.hold = null;
-        email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, w.unverified ? 'הקבלה נשלחת בנפרד ממערכת הסליקה.' : `חשבונית מס קבלה מס׳ ${w.invoice} מצורפת.`, `ביטול או שינוי מועד עד ${S.settings.workshopCancelHours} שעות לפני הסדנה, בקישור למטה. ביטול מאוחר יותר אינו כולל החזר.`, 'נתראה, תמימה'], { extra: w.unverified ? '' : receiptMailHtml(w.invoice, w.customer.name, wsDesc(w), w.amount, w.paidAt) + receiptLinkHtml(w.receiptUrl), cta: ['לניהול ההזמנה', bookingUrl(w)] });
-        email('newBooking', toStudio(), `הזמנה חדשה: ${w.customer.name}, ${shortDay(w.date)} ${w.time}`, [`${w.customer.name}: הזמנת סדנה מהאתר.`, `${longDay(w.date)}, ${w.time} · ${w.n} משתתפים · ${money(w.amount)}${w.coupon ? ` (קופון ${w.coupon.code})` : ''}.`, `טלפון: ${w.customer.phone}`].concat(w.unverified ? ['התשלום לא אומת: שולם בקישור תשלום קבוע. כדאי לבדוק במורנינג שהתשלום התקבל.'] : []), { cta: ['לסדנאות', siteUrl('#/tamima/workshops')] });
+        email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, `חשבונית מס קבלה מס׳ ${w.invoice} מצורפת.`, `ביטול או שינוי מועד עד ${S.settings.workshopCancelHours} שעות לפני הסדנה, בקישור למטה. ביטול מאוחר יותר אינו כולל החזר.`, 'נתראה, תמימה'], { extra: receiptMailHtml(w.invoice, w.customer.name, wsDesc(w), w.amount, w.paidAt) + receiptLinkHtml(w.receiptUrl), cta: ['לניהול ההזמנה', bookingUrl(w)] });
+        email('newBooking', toStudio(), `הזמנה חדשה: ${w.customer.name}, ${shortDay(w.date)} ${w.time}`, [`${w.customer.name}: הזמנת סדנה מהאתר.`, `${longDay(w.date)}, ${w.time} · ${w.n} משתתפים · ${money(w.amount)}.`, `טלפון: ${w.customer.phone}`], { cta: ['לסדנאות', siteUrl('#/tamima/workshops')] });
         log('notify', 'הזמנה חדשה נכנסה לדשבורד', `סדנה מהאתר, ${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}.`);
         // הסכמה לדיוור: נשמרת בכרטיס הלקוח עם התאריך
         if (bk.marketing) { const cu = customerOf(w); if (cu) Object.assign(cu, { marketing: true, marketingAt: todayIso() }); }

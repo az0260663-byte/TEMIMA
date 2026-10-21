@@ -52,6 +52,14 @@ const client = { name: 'מיכל בדיקה', email: 'michal@example.com', phone
   assert(f.amount === 3 && f.type === 320 && f.currency === 'ILS' && f.custom === 'ws_test1' && f.description.includes('הזמנה ws_test1'), 'לדף נשלחו הסכום מהשרת (לא 0.01 מהדפדפן), חשבונית מס קבלה ומזהה ההזמנה');
   assert(f.client.name === client.name && f.client.emails[0] === client.email && f.client.phone === client.phone, 'פרטי הלקוח נשלחו מראש, כדי שלא יקליד אותם שוב');
 
+  // קופון: השרת מחשב את ההנחה בעצמו, ולא פחות מ-1 ₪
+  r = await call('/api/pay/start', { ref: 'ws_coupon', kind: 'workshop', n: 2, coupon: 'test679', client }); d = await r.json();
+  assert(r.ok && d.amount === 1 && mr.forms[1].amount === 1, 'קופון TEST679: הסכום בדף התשלום 1 ₪');
+  r = await call('/api/pay/start', { ref: 'ws_coupon2', kind: 'workshop', n: 2, coupon: 'FAKE', client });
+  assert(r.status === 400, 'קופון לא קיים נדחה, ולא נפתח דף תשלום');
+  r = await call('/api/pay/start', { ref: 'cp_coupon', kind: 'card', coupon: 'TEST679', client });
+  assert(r.status === 400, 'קופון לסדנה לא חל על כרטיסייה');
+
   r = await call('/api/pay/start', { ref: 'ws_test2', kind: 'workshop', n: 3, client }, { 'X-Tamima': '' });
   assert(r.status === 403, 'פתיחת דף תשלום בלי הכותרת של המערכת נחסמת');
   r = await call('/api/pay/start', { ref: 'bad ref!', kind: 'workshop', n: 3, client });
