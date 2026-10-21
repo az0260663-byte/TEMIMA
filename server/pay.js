@@ -22,6 +22,8 @@ const BASE = {
 };
 // מחירי בדיקה: זוג 2 ₪, כל משתתף נוסף 1 ₪, כרטיסייה 4 ₪. כך רואים שהסכום משתנה לפי ההזמנה, בלי לשלם הרבה
 const TEST_PRICES = { price2: 2, pricePer: 1, cardPrice: 4 };
+// המחירים האמיתיים (כמו בהגדרות הסטודיו). ברירת המחדל. PAY_TEST_PRICES=1 מחזיר למחירי בדיקה
+const REAL_PRICES = { price2: 680, pricePer: 300, cardPrice: 800 };
 const DOC_TYPE = 320; // חשבונית מס / קבלה
 // קופונים (כרגע רק לבדיקה). השרת מחשב את ההנחה בעצמו, ולא סומך על סכום מהדפדפן. לפחות 1 ₪ לתשלום
 const COUPONS = { TEST679: 679 };
@@ -48,6 +50,8 @@ function payRoutes(opts = {}) {
     mode: env.MORNING_ENV === 'sandbox' ? 'sandbox' : 'production'
   };
   const live = !!(cfg.id && cfg.secret);
+  const TEST = env.PAY_TEST_PRICES === '1';
+  const PRICES = TEST ? TEST_PRICES : REAL_PRICES;
   // קישור תשלום קבוע (אופציונלי): אם הוגדר, הלקוחות משלמים בו, והשרת מזהה את התשלום לפי סכום, מייל ושעה
   const fixedLink = /^https:\/\/[\w.-]+\/\S+$/.test(env.MORNING_FIXED_LINK || '') ? env.MORNING_FIXED_LINK : '';
   const base = BASE[cfg.mode];
@@ -91,7 +95,7 @@ function payRoutes(opts = {}) {
   const fail = (e, text) => { console.error('מורנינג:', e.message); return [502, { error: e.reason === 'no_api' ? 'בחשבון במורנינג אין גישה לחיבור מערכות (API). צריך מסלול שכולל אותו.' : e.reason === 'no_plugin' ? 'בחשבון במורנינג אין מסוף סליקה פעיל.' : text }]; };
 
   const routes = {
-    'GET /api/pay/config': async () => [200, live ? { live: true, provider: 'morning', env: cfg.mode, test: true, prices: TEST_PRICES, fixedLink } : { live: false }],
+    'GET /api/pay/config': async () => [200, live ? { live: true, provider: 'morning', env: cfg.mode, test: TEST, prices: PRICES, fixedLink } : { live: false }],
 
     /* קישור קבוע: הלקוח לחץ "לתשלום" והקישור נפתח. כאן נרשם מה מחכים לו: סכום (מהשרת), מייל ושם, ומתי.
        אחר כך /api/pay/check מחפש קבלה חדשה במורנינג עם אותו סכום ואותו מייל (או שם), שנוצרה אחרי הלחיצה */
@@ -100,7 +104,7 @@ function payRoutes(opts = {}) {
       const ref = String(b.ref || '');
       if (!/^[\w-]{4,60}$/.test(ref)) return [400, { error: 'מזהה הזמנה לא תקין.' }];
       const kind = b.kind === 'card' ? 'card' : b.kind === 'workshop' ? 'workshop' : '';
-      const base = amountFor(kind, Number(b.n));
+      const base = amountFor(kind, Number(b.n), PRICES);
       if (!base) return [400, { error: 'סוג ההזמנה או מספר המשתתפים לא תקינים.' }];
       if (b.coupon && (kind !== 'workshop' || !COUPONS[String(b.coupon).trim().toUpperCase()])) return [400, { error: 'הקופון לא תקין.' }];
       const amount = kind === 'workshop' ? withCoupon(base, b.coupon) : base;
@@ -117,7 +121,7 @@ function payRoutes(opts = {}) {
       const ref = String(b.ref || '');
       if (!/^[\w-]{4,60}$/.test(ref)) return [400, { error: 'מזהה הזמנה לא תקין.' }];
       const kind = b.kind === 'card' ? 'card' : b.kind === 'workshop' ? 'workshop' : '';
-      const base = amountFor(kind, Number(b.n));
+      const base = amountFor(kind, Number(b.n), PRICES);
       if (!base) return [400, { error: 'סוג ההזמנה או מספר המשתתפים לא תקינים.' }];
       if (b.coupon && (kind !== 'workshop' || !COUPONS[String(b.coupon).trim().toUpperCase()])) return [400, { error: 'הקופון לא תקין.' }];
       const amount = kind === 'workshop' ? withCoupon(base, b.coupon) : base;
@@ -176,4 +180,4 @@ function payRoutes(opts = {}) {
   return { routes, live };
 }
 
-module.exports = { payRoutes, amountFor, withCoupon, TEST_PRICES };
+module.exports = { payRoutes, amountFor, withCoupon, TEST_PRICES, REAL_PRICES };

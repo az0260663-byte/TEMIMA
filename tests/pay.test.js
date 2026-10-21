@@ -4,7 +4,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { createApp } = require('../server/server.js');
-const { amountFor } = require('../server/pay.js');
+const { amountFor, withCoupon, REAL_PRICES } = require('../server/pay.js');
+process.env.PAY_TEST_PRICES = '1'; // הבדיקות כאן במחירי בדיקה
 const assert = (c, m) => { if (!c) { console.error('FAIL:', m); process.exitCode = 1; } else console.log('ok  -', m); };
 
 // מורנינג מדומה: כרטיס כניסה, דף תשלום, חיפוש מסמכים וקישור הורדה
@@ -42,6 +43,7 @@ const client = { name: 'מיכל בדיקה', email: 'michal@example.com', phone
   let r = await call('/api/pay/config'); let d = await r.json();
   assert(d.live && d.provider === 'morning' && d.test && d.prices.price2 === 2 && d.prices.cardPrice === 4, 'השרת מחובר למורנינג, במחירי בדיקה');
 
+  assert(amountFor('workshop', 2, REAL_PRICES) === 680 && withCoupon(680, 'TEST679') === 1 && amountFor('workshop', 3, REAL_PRICES) === 900, 'מחירים אמיתיים: זוג 680 ₪, ועם TEST679 נשאר 1 ₪');
   // הסכום נקבע בשרת, לא בדפדפן
   assert(amountFor('workshop', 2) === 2 && amountFor('workshop', 3) === 3 && amountFor('workshop', 6) === 6 && amountFor('card') === 4, 'הסכום לפי סוג ההזמנה ומספר המשתתפים');
   assert(amountFor('workshop', 1) === null && amountFor('workshop', 7) === null && amountFor('other', 2) === null, 'סוג או מספר משתתפים לא תקינים נדחים');
