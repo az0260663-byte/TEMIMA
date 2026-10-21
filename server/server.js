@@ -21,6 +21,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { createStore } = require('./store');
 const { dataRoutes } = require('./api');
+const { payRoutes } = require('./pay');
 const { createBackup } = require('./backup');
 
 const ROOT = path.join(__dirname, '..');
@@ -216,6 +217,9 @@ function createApp(opts = {}) {
   const backup = createBackup({ store, dir: path.join(cfg.dataDir, 'backups'), seal, open });
   const data = dataRoutes({ store, authed });
   Object.assign(routes, data.routes);
+  // סליקה (pay.js): פועלת רק אם הוגדרו פרטי החיבור למורנינג בקובץ server/.env
+  const pay = payRoutes({ env, fetch: opts.payFetch || cfg.fetch, now: opts.now });
+  Object.assign(routes, pay.routes);
 
   /* ---------- קבצים סטטיים ---------- */
   const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.ico': 'image/x-icon', '.md': 'text/plain; charset=utf-8' };
@@ -236,7 +240,9 @@ function createApp(opts = {}) {
     const fn = routes[route];
     if (!fn) return send(res, 404, { error: 'not found' });
     const isData = route.includes(' /api/data');
-    if (limited(req, isData ? 'data' : 'auth', isData ? 300 : 60)) return send(res, 429, { error: 'יותר מדי בקשות. נסו שוב בעוד דקה.' });
+    const isPay = route.includes(' /api/pay/');
+    // הסליקה פתוחה גם ללקוחות בלי כניסה, ולכן מכסה נפרדת: מספיקה לבדיקת תשלום כל 3 שניות
+    if (limited(req, isData ? 'data' : isPay ? 'pay' : 'auth', isData ? 300 : isPay ? 40 : 60)) return send(res, 429, { error: 'יותר מדי בקשות. נסו שוב בעוד דקה.' });
     // גם קריאת הנתונים מוגנת: רק מהאתר עצמו, עם הכותרת שדפדפן לא שולח לבד
     if ((req.method === 'POST' || isData) && !sameOrigin(req)) return send(res, 403, { error: 'בקשה ממקור לא מורשה.' });
     try {

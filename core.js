@@ -48,6 +48,8 @@
     lead = { name: '', phone: '', email: '', group: '', sent: false, err: '', errField: '', marketing: false };
     ui.accForm = { name: '', contact: '', text: '', sent: false, err: '', errField: '' };
     Object.assign(ui, { sheet: null, weekOffset: 0, lessonSel: {}, rcpt: null, stuMsg: null });
+    // סליקה אמיתית במחירי בדיקה: המחירים מוחלפים גם אחרי איפוס
+    if (typeof applyPayPrices === 'function') applyPayPrices();
   }
 
   /* ---------- עזרים ---------- */
@@ -293,17 +295,17 @@
     if (Number(p.Amount) !== Number(w.amount)) return reject(`הסכום בסאמיט (${money(p.Amount)}) שונה מהסכום בהזמנה (${money(w.amount)}).`);
     return confirmWorkshop(w, p, via);
   }
-  const VIA = { ipn: 'הודעת שרת מסאמיט', return: 'החזרה לאתר' };
+  const VIA = { ipn: 'הודעת שרת מסאמיט', return: 'החזרה לאתר', check: 'בדיקה מול הסליקה' };
   function confirmCard(s, p, via) {
     if (Number(p.Amount) !== Number(s.payOrder.amount)) { log('sumit', 'אישור תשלום נדחה', `הסכום בסאמיט שונה מהסכום שנדרש מ${s.name}.`); return { result: 'rejected' }; }
     addSumitId(s, p.CustomerID);
-    payCard(s, { invoice: p.DocumentNumber, docId: p.DocumentID, paymentId: p.PaymentID, orderId: p.ExternalIdentifier });
+    payCard(s, { invoice: p.DocumentNumber, docId: p.DocumentID, paymentId: p.PaymentID, orderId: p.ExternalIdentifier, receiptUrl: p.ReceiptUrl });
     s.payOrder = null;
     log('sumit', `${VIA[via]}: התשלום אומת`, `${s.name}, כרטיסייה. חשבונית מס קבלה מס׳ ${p.DocumentNumber} נשמרה.`);
     return { result: 'confirmed', s };
   }
   function confirmWorkshop(w, p, via) {
-    Object.assign(w, { status: 'confirmed', invoice: p.DocumentNumber, docId: p.DocumentID, paymentId: p.PaymentID, paidAt: todayIso() });
+    Object.assign(w, { status: 'confirmed', invoice: p.DocumentNumber, docId: p.DocumentID, paymentId: p.PaymentID, paidAt: todayIso() }, p.ReceiptUrl ? { receiptUrl: p.ReceiptUrl } : {});
     delete w.holdUntil;
     const removed = bookWorkshop(w);
     addSumitId(customerOf(w), p.CustomerID);
@@ -501,10 +503,10 @@
   function payCard(s, o = {}) {
     const inv = o.invoice || S.nextInvoice++;
     const opens = isLocked(s);                              // התשלום הראשון פותח את האזור האישי
-    S.payments.push({ id: uid('p'), studentId: s.id, date: todayIso(), amount: S.settings.cardPrice, invoice: inv, docId: o.docId || null, paymentId: o.paymentId || null, orderId: o.orderId || null, manual: !!o.manual });
+    S.payments.push(Object.assign({ id: uid('p'), studentId: s.id, date: todayIso(), amount: S.settings.cardPrice, invoice: inv, docId: o.docId || null, paymentId: o.paymentId || null, orderId: o.orderId || null, manual: !!o.manual }, o.receiptUrl ? { receiptUrl: o.receiptUrl } : {}));
     if (s.owes) { s.owes = false; s.firstDue = false; s.requestSent = false; s.reminded = null; } else s.nextPaid = true;
     if (o.manual) log('sumit', `תשלום נרשם ידנית: ${s.name}`, `${money(S.settings.cardPrice)}, חשבונית מס קבלה מס׳ ${inv}.`);
-    email('payReceipt', toStudent(s), `התשלום התקבל, חשבונית מס קבלה מס׳ ${inv}`, [`היי ${first(s)},`, `קיבלנו את התשלום על הכרטיסייה (${money(S.settings.cardPrice)}). תודה!`, `חשבונית מס קבלה מס׳ ${inv} מצורפת ונשמרת גם באפליקציה.`].concat(opens ? ['מעכשיו האזור האישי שלך פתוח: השיעורים, הכרטיסייה, ההשלמות והתשלומים. זה הקישור האישי שלך, כדאי לשמור אותו.'] : []), { cta: opens ? ['לאזור האישי שלי', studentUrl(s, 'home')] : ['לתשלומים שלי', studentUrl(s, 'payments')] });
+    email('payReceipt', toStudent(s), `התשלום התקבל, חשבונית מס קבלה מס׳ ${inv}`, [`היי ${first(s)},`, `קיבלנו את התשלום על הכרטיסייה (${money(S.settings.cardPrice)}). תודה!`, `חשבונית מס קבלה מס׳ ${inv} מצורפת ונשמרת גם באפליקציה.`].concat(opens ? ['מעכשיו האזור האישי שלך פתוח: השיעורים, הכרטיסייה, ההשלמות והתשלומים. זה הקישור האישי שלך, כדאי לשמור אותו.'] : []), { extra: typeof receiptLinkHtml === 'function' ? receiptLinkHtml(o.receiptUrl) : '', cta: opens ? ['לאזור האישי שלי', studentUrl(s, 'home')] : ['לתשלומים שלי', studentUrl(s, 'payments')] });
     return inv;
   }
 
@@ -561,6 +563,14 @@
 
   // דף התשלום של סאמיט (מדומה). failAct: הדגמה של תשלום שנכשל
   function sumitView(amount, desc, payAct, backAct, failAct, before = '', opts = {}) {
+    // סליקה אמיתית: פרטי הכרטיס מוקלדים רק בדף של הספק, ולכן כאן רק הסכום וכפתור לדף התשלום
+    if (typeof PAY !== 'undefined' && PAY.live) return `<div class="sumit live-pay">
+      <div class="sumit-head"><div><b>תשלום מאובטח</b><small>בדף של ${PAY_PROVIDER[PAY.provider] || 'הסליקה'}</small></div>${PAY.test ? '<span class="demo-badge">בדיקה: תשלום אמיתי, במחיר בדיקה</span>' : ''}</div>
+      <div class="sumit-amount"><small>${esc(desc)}</small><b>${money(amount)}</b><small>לתשלום לסטודיו של תמימה</small></div>${before}
+      <p class="hint">דף התשלום ייפתח בלשונית חדשה. פרטי הכרטיס מוקלדים רק שם.</p>
+      <button class="btn primary block" data-act="${payAct}" ${opts.payDisabled ? 'disabled' : ''}>לתשלום ${money(amount)}</button>
+      <button class="btn ghost block" data-act="${backAct}">חזרה</button>
+    </div>`;
     return `<div class="sumit">
       <div class="sumit-head"><div><b>סאמיט</b><small>תשלום מאובטח</small></div><span class="demo-badge">דמו, אין חיוב</span></div>
       <div class="sumit-amount"><small>${esc(desc)}</small><b>${money(amount)}</b><small>לתשלום לסטודיו של תמימה</small></div>

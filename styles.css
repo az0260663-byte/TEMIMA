@@ -1274,3 +1274,8 @@ ul.cal-legend { list-style: none; padding: 0; margin: 12px 0 0; }
 .save-pill.error { color: var(--bad); background: var(--bad-soft); border-color: transparent; }
 @media (max-width: 720px) { .save-pill { bottom: calc(100px + env(safe-area-inset-bottom)); } .be-account.side { display: none; } }
 @media (prefers-reduced-motion: reduce) { .save-pill { transition: none; } }
+
+/* סליקה אמיתית: מסך ההמתנה בזמן שהלקוח משלם בלשונית של הספק */
+.live-pay .live-wait { display: flex; align-items: center; gap: 10px; justify-content: center; font-weight: 600; margin: 14px 0 6px; }
+.live-pay .live-wait .spin { width: 20px; height: 20px; }
+.live-pay .hint { text-align: center; }

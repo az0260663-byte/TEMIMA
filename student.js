@@ -160,6 +160,8 @@
     if (ps.key !== 'requested' && ps.key !== 'overdue') return `<a class="back" href="#/student/payments">חזרה</a>${card(empty('אין כרגע תשלום פתוח.'))}`;
     // התשלום הראשון: אישור מדיניות הביטולים לפני התשלום. בלי אישור אין תשלום
     const first = s.firstDue;
+    // סליקה אמיתית: הלקוח משלם בלשונית אחרת, וכאן מחכים לאישור
+    if (ui.stuLive && s.payOrder && ui.stuLive.ref === s.payOrder.id) return '<h1 class="sr-only">תשלום</h1>' + liveWaitView(ui.stuLive, 'stuPayBack');
     return '<h1 class="sr-only">תשלום</h1>' + sumitView(S.settings.cardPrice, 'כרטיסייה, 4 שיעורים', 'stuPay', 'stuPayBack', null,
       first ? `<div class="policy-box">${policyHtml()}${policyCheck()}</div>` : '', { payDisabled: first && !(ui.pol && ui.pol.ok) });
   }
@@ -231,12 +233,30 @@
       if (s0.firstDue && !(ui.pol && ui.pol.ok)) { ui.stuMsg = 'כדי לשלם צריך לאשר את מדיניות הביטולים.'; render(); return; }
       if (s0.firstDue) s0.policy = { date: todayIso(), version: S.settings.policyVersion };
       const opens = isLocked(s0);
+      if (PAY.live) {
+        s0.payOrder = { id: uid('cp'), amount: S.settings.cardPrice };
+        ui.stuLive = {};
+        livePayStart({ id: s0.payOrder.id, customer: { name: s0.name, phone: s0.phone, email: s0.email }, amount: s0.payOrder.amount, desc: `כרטיסייה, ${S.settings.cardSize} שיעורים` }, 'card', 0, ui.stuLive)
+          .then(() => { render(); livePoll(ui.stuLive, id => A.stuPayDone(id, opens), () => render()); })
+          .catch(() => render());
+        render();
+        return;
+      }
       const inv = payCardOnline(s0);
       if (!inv) { ui.stuMsg = 'לא הצלחנו לאמת את התשלום. אפשר לנסות שוב.'; render(); return; }
       ui.stuMsg = opens ? `התשלום התקבל, והאזור האישי פתוח. חשבונית מס קבלה מס׳ ${inv} והקישור האישי נשלחו למייל.` : `התשלום התקבל. חשבונית מס קבלה מס׳ ${inv} נשלחה למייל.`;
       location.hash = opens ? '#/student/home' : '#/student/payments'; flashClear();
     },
-    stuPayBack() { history.back(); },
+    // תשלום אמיתי שאומת: אותה נקודת אישור כמו כל תשלום
+    stuPayDone(paymentId, opens) {
+      const res = confirmPayment(paymentId, 'check');
+      ui.stuLive = null;
+      if (res.result !== 'confirmed') { ui.stuMsg = res.result === 'already' ? 'התשלום כבר נרשם.' : 'לא הצלחנו לאמת את התשלום. אפשר לנסות שוב.'; render(); return; }
+      const inv = (S.payments.find(p => p.paymentId === paymentId) || {}).invoice;
+      ui.stuMsg = opens ? `התשלום התקבל, והאזור האישי פתוח. חשבונית מס קבלה מס׳ ${inv} והקישור האישי נשלחו למייל.` : `התשלום התקבל. חשבונית מס קבלה מס׳ ${inv} נשלחה למייל.`;
+      location.hash = opens ? '#/student/home' : '#/student/payments'; flashClear();
+    },
+    stuPayBack() { if (ui.stuLive) { livePollStop(); ui.stuLive = null; render(); return; } history.back(); },
     stuPolicyApprove() {
       const s = me();
       if (!(ui.pol && ui.pol.ok)) return;

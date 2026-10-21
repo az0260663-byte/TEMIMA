@@ -237,4 +237,6 @@
   const viaServer = typeof backendBoot === 'function' && backendBoot();
   if (!viaServer) runAutomations();
   render();
+  // סליקה אמיתית, אם השרת מחובר לספק סליקה. בלי שרת הכל נשאר מדומה
+  if (typeof payDetect === 'function') payDetect();
   setInterval(() => { if (!serverOwned() || BE.status === 'ready') runAutomations(); }, 60 * 1000);

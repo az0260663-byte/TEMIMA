@@ -199,7 +199,9 @@
     holdTimer = setInterval(() => {
       const h = pendingOrder(bk.hold);
       if (bk.step !== 'pay' || route().page !== 'workshop') { clearInterval(holdTimer); holdTimer = null; if (bk.step === 'pay' && !h) A.bkExpire(); return; }
-      if (!h) { clearInterval(holdTimer); holdTimer = null; A.bkExpire(); return; }
+      if (!h) { clearInterval(holdTimer); holdTimer = null; livePollStop(); bk.live = null; A.bkExpire(); return; }
+      // בזמן שהלקוח משלם בלשונית של הסליקה, המועד ממשיך להישמר לו (עד 15 דקות, ואז הבדיקה נעצרת)
+      if (bk.live && !bk.live.error) touchHold(h.id);
       const el = document.getElementById('hold-left');
       if (el) el.textContent = mmss(h.holdUntil - now().getTime());
     }, 1000);
@@ -270,7 +272,8 @@
 
     if (bk.step === 'pay') {
       const h = pendingOrder(bk.hold);
-      body = (h ? `<p class="hold-note">ההזמנה ממתינה לתשלום. המועד שמור לכם עוד <b id="hold-left">${mmss(h.holdUntil - now().getTime())}</b> דקות</p>` : '') + err + sumitView(price(bk.n), `סדנת היכרות, ${bk.n} משתתפים, ${shortDay(bk.date)} ${bk.time}`, 'bkPay', 'bkPayBack', 'bkPayFail');
+      body = (h ? `<p class="hold-note">ההזמנה ממתינה לתשלום. המועד שמור לכם עוד <b id="hold-left">${mmss(h.holdUntil - now().getTime())}</b> דקות</p>` : '') + err
+        + (bk.live ? liveWaitView(bk.live, 'bkPayBack') : sumitView(price(bk.n), `סדנת היכרות, ${bk.n} משתתפים, ${shortDay(bk.date)} ${bk.time}`, 'bkPay', 'bkPayBack', 'bkPayFail'));
       startHoldTimer();
     }
     if (bk.step === 'confirming') body = card(`<div class="confirming" role="status"><span class="spin" aria-hidden="true"></span><h2>מאשרים את התשלום</h2><p class="muted">רגע, ההזמנה נסגרת.</p></div>`);
@@ -401,11 +404,22 @@
       touchHold(w.id);
       // לקוח מוכר (לפי טלפון) נשלח עם המזהה שלו בסאמיט, כדי שהקבלה תירשם על אותו כרטיס
       const known = (S.customers || []).find(k => k.phones.includes(normPhone(w.customer.phone)));
+      // סליקה אמיתית: דף תשלום להזמנה הזו נפתח בלשונית חדשה, וההזמנה מתעדכנת לבד כשהתשלום מאומת
+      if (PAY.live) {
+        if (!stillBookable(w)) { expireOrder(w.id, true); bk.hold = null; bk.step = 'slot'; bk.time = null; bk.err = 'המועד כבר לא זמין, ולא בוצע חיוב. בחרו מועד אחר.'; render(); scrollTop(); return; }
+        bk.live = {};
+        bk.err = ''; bk.step = 'pay';
+        livePayStart({ id: w.id, customer: w.customer, amount: w.amount, desc: wsDesc(w) }, 'workshop', w.n, bk.live)
+          .then(() => { render(); livePoll(bk.live, id => { touchHold(w.id); A.bkFinish(id, ['check']); }, () => { touchHold(w.id); render(); }); })
+          .catch(() => render());
+        render(); scrollTop();
+        return;
+      }
       sumitBeginRedirect({ id: w.id, customer: w.customer, sumitId: sumitIdOf(known), amount: w.amount, desc: wsDesc(w) });
       bk.err = ''; bk.step = 'pay';
       render(); scrollTop();
     },
-    bkPayBack() { bk.err = ''; bk.step = 'summary'; render(); },
+    bkPayBack() { livePollStop(); bk.live = null; bk.err = ''; bk.step = 'summary'; render(); },
     // עברו 10 דקות בלי פעילות: ההזמנה פגה, המועד משתחרר, והלקוח חוזר לבחירת מועד
     bkExpire() {
       expireOrder(bk.hold); bk.hold = null;
@@ -436,12 +450,20 @@
       setTimeout(() => {
         const order = sumitStore().ipnFirst ? ['ipn', 'return'] : ['return', 'ipn'];
         sumitStore().ipnFirst = false;
-        const res = order.map(via => confirmPayment(back['og-paymentid'], via));
+        A.bkFinish(back['og-paymentid'], order);
+      }, 1200);
+    },
+    /* אחרי תשלום: אישור מול הספק, ואז מייל אחד ללקוח, הודעה לתמימה ומסך "ההזמנה אושרה".
+       vias: הדרכים שהגיעו לאישור (בדמו: החזרה לאתר והודעת השרת). בסליקה האמיתית: הבדיקה של השרת מול הספק */
+    bkFinish(paymentId, order = ['return']) {
+      {
+        const res = order.map(via => confirmPayment(paymentId, via));
         if (res.some(x => x.result === 'already')) log('sumit', 'אישור כפול נעצר', `${order[1] === 'ipn' ? 'הודעת השרת מסאמיט' : 'החזרה לאתר'} הגיעה אחרי שההזמנה כבר אושרה. לא נוצרה הזמנה שנייה, ולא נשלח מייל שני.`);
         const w = (res.find(x => x.result === 'confirmed') || {}).w;
         if (!w) { bk.step = 'pay'; bk.err = 'לא הצלחנו לאמת את התשלום. אפשר לנסות שוב.'; render(); return; }
+        bk.live = null;
         bk.hold = null;
-        email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, `חשבונית מס קבלה מס׳ ${w.invoice} מצורפת.`, `ביטול או שינוי מועד עד ${S.settings.workshopCancelHours} שעות לפני הסדנה, בקישור למטה. ביטול מאוחר יותר אינו כולל החזר.`, 'נתראה, תמימה'], { extra: receiptMailHtml(w.invoice, w.customer.name, wsDesc(w), w.amount, w.paidAt), cta: ['לניהול ההזמנה', bookingUrl(w)] });
+        email('booking', toCustomer(w), `הסדנה נקבעה: ${shortDay(w.date)} ${w.time}`, [`שלום ${w.customer.name.split(' ')[0]},`, `הסדנה שלכם נקבעה ל${longDay(w.date)}, ${w.time} עד ${endOf(w.time)}.`, `${w.n} משתתפים · שולם ${money(w.amount)}.`, `הכתובת: ${S.content.address}.`, `חשבונית מס קבלה מס׳ ${w.invoice} מצורפת.`, `ביטול או שינוי מועד עד ${S.settings.workshopCancelHours} שעות לפני הסדנה, בקישור למטה. ביטול מאוחר יותר אינו כולל החזר.`, 'נתראה, תמימה'], { extra: receiptMailHtml(w.invoice, w.customer.name, wsDesc(w), w.amount, w.paidAt) + receiptLinkHtml(w.receiptUrl), cta: ['לניהול ההזמנה', bookingUrl(w)] });
         email('newBooking', toStudio(), `הזמנה חדשה: ${w.customer.name}, ${shortDay(w.date)} ${w.time}`, [`${w.customer.name}: הזמנת סדנה מהאתר.`, `${longDay(w.date)}, ${w.time} · ${w.n} משתתפים · ${money(w.amount)}.`, `טלפון: ${w.customer.phone}`], { cta: ['לסדנאות', siteUrl('#/tamima/workshops')] });
         log('notify', 'הזמנה חדשה נכנסה לדשבורד', `סדנה מהאתר, ${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}.`);
         // הסכמה לדיוור: נשמרת בכרטיס הלקוח עם התאריך
@@ -449,7 +471,7 @@
         bk.done = w.id; bk.step = 'done';
         render(); scrollTop();
         toast('הזמנה חדשה מהאתר', `${w.customer.name}, ${w.n} משתתפים, ${shortDay(w.date)} ${w.time}`);
-      }, 1200);
+      }
     },
     // ההזמנה שלי
     cbLateSend() {

@@ -40,9 +40,9 @@
   }
   // אימות התשלום מול סאמיט לפני שמסמנים "שולם": /billing/payments/get/
   function sumitGetPayment(id) {
-    sumitLog('סאמיט: אימות התשלום', 'POST', '/billing/payments/get/', { PaymentID: id });
+    if (!PAY.live) sumitLog('סאמיט: אימות התשלום', 'POST', '/billing/payments/get/', { PaymentID: id });
     const p = sumitStore().payments[id];
-    return p ? { PaymentID: p.id, ValidPayment: p.valid, Amount: p.amount, DocumentNumber: p.doc, DocumentID: p.docId, CustomerID: p.customerId, ExternalIdentifier: p.ref } : null;
+    return p ? { PaymentID: p.id, ValidPayment: p.valid, Amount: p.amount, DocumentNumber: p.doc, DocumentID: p.docId, CustomerID: p.customerId, ExternalIdentifier: p.ref, ReceiptUrl: p.receiptUrl || '' } : null;
   }
 
   /* מסמך מתוך המערכת (קבלה לסדנה מערוץ שיווק): /accounting/documents/create/
@@ -56,6 +56,82 @@
     });
     return doc;
   }
+
+  /* ---------- סליקה אמיתית (כשהדף מוגש מהשרת, והשרת מחובר לספק) ----------
+     כרגע הספק הוא מורנינג, במחירי בדיקה. בלי שרת (גיטהאב, הדמו המפורסם) הכל נשאר מדומה כמו קודם.
+     דף התשלום נפתח בלשונית חדשה, והדף הזה שואל את השרת כל 3 שניות אם התשלום התקבל.
+     תשלום שאומת נכנס לאותה נקודת אישור (confirmPayment) כמו כל תשלום, עם הסכום ומספר הקבלה מהספק. */
+  const PAY = { live: false, test: false, prices: null, provider: '' };
+  const PAY_PROVIDER = { morning: 'מורנינג' };
+  function applyPayPrices() { if (PAY.live && PAY.prices && S) Object.assign(S.settings, PAY.prices); }
+  async function payDetect() {
+    if (!/^https?:$/.test(location.protocol)) return;
+    try {
+      const r = await fetch('api/pay/config', { cache: 'no-store' });
+      const d = r.ok ? await r.json() : null;
+      if (!d || !d.live) return;
+      Object.assign(PAY, { live: true, test: !!d.test, prices: d.prices, provider: d.provider });
+      applyPayPrices();
+      render();
+    } catch (e) { /* אין שרת: נשארים בדמו */ }
+  }
+  async function payPost(path, body) {
+    let r;
+    try { r = await fetch('api/pay/' + path, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Tamima': '1' }, body: JSON.stringify(body) }); }
+    catch (e) { throw new Error('אין חיבור לשרת כרגע.'); }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'שגיאה בחיבור לסליקה.');
+    return d;
+  }
+  /* פתיחת דף תשלום להזמנה. חייב לרוץ מתוך הלחיצה: הלשונית נפתחת מיד, והכתובת מגיעה מהשרת אחר כך.
+     live: { ref, url, popup, error, since } נשמר אצל מי שקרא, ומוצג ב-liveWaitView */
+  function livePayStart(order, kind, n, live) {
+    const win = window.open('', '_blank');
+    Object.assign(live, { ref: order.id, url: '', popup: !!win, error: '', since: Date.now(), amount: order.amount, desc: order.desc });
+    log('sumit', `${PAY_PROVIDER[PAY.provider] || 'סליקה'}: נפתח דף תשלום אמיתי`, `${order.desc}, ${money(order.amount)}. מזהה ההזמנה: ${order.id}.`);
+    return payPost('start', { ref: order.id, kind, n, desc: order.desc, client: { name: order.customer.name, email: order.customer.email, phone: order.customer.phone } })
+      .then(d => { live.url = d.url; if (win) { try { win.opener = null; } catch (e) { /* לא נתמך */ } win.location.href = d.url; } return d; })
+      .catch(e => { if (win) win.close(); live.error = e.message; throw e; });
+  }
+  /* בדיקה אם ההזמנה שולמה. כשכן: התשלום נרשם כתשלום מאומת, ומוחזר המזהה שלו לאישור */
+  async function livePayCheck(ref) {
+    const d = await payPost('check', { ref });
+    if (!d.paid) { if (d.error) throw new Error(d.error); return null; }
+    const id = `mrn_${d.docId}`;
+    sumitStore().payments[id] = { id, ref, amount: d.amount, valid: true, doc: d.number, docId: d.docId, customerId: '', receiptUrl: d.receiptUrl };
+    log('sumit', `${PAY_PROVIDER[PAY.provider] || 'סליקה'}: התשלום אומת`, `קבלה מס׳ ${d.number} על ${money(d.amount)}. הסכום זהה לסכום ההזמנה.`);
+    return id;
+  }
+  let livePollT = null;
+  // שואל כל 3 שניות, עד 15 דקות. onPaid(paymentId) נקרא פעם אחת
+  function livePoll(live, onPaid, onChange) {
+    clearInterval(livePollT);
+    let busy = false;
+    livePollT = setInterval(async () => {
+      if (busy) return;
+      if (Date.now() - live.since > 15 * 60e3) { clearInterval(livePollT); live.error = 'לא התקבל תשלום ב-15 הדקות האחרונות. אפשר לנסות שוב.'; onChange(); return; }
+      busy = true;
+      try { const id = await livePayCheck(live.ref); if (id) { clearInterval(livePollT); onPaid(id); } else if (live.error) { live.error = ''; onChange(); } }
+      catch (e) { if (live.error !== e.message) { live.error = e.message; onChange(); } }
+      finally { busy = false; }
+    }, 3000);
+  }
+  const livePollStop = () => clearInterval(livePollT);
+  // המסך בזמן שהלקוח משלם בלשונית האחרת
+  function liveWaitView(live, backAct) {
+    const name = PAY_PROVIDER[PAY.provider] || 'הסליקה';
+    return `<div class="sumit live-pay">
+      <div class="sumit-head"><div><b>תשלום מאובטח</b><small>בדף של ${name}</small></div>${PAY.test ? '<span class="demo-badge">בדיקה: תשלום אמיתי, במחיר בדיקה</span>' : ''}</div>
+      <div class="sumit-amount"><small>${esc(live.desc || '')}</small><b>${money(live.amount || 0)}</b></div>
+      ${live.error ? `<p class="err" role="alert">${esc(live.error)}</p>` : `<p class="live-wait" role="status"><span class="spin" aria-hidden="true"></span>${live.url ? 'מחכים לאישור התשלום...' : 'פותחים את דף התשלום...'}</p>`}
+      <p class="hint">${live.popup ? 'דף התשלום נפתח בלשונית חדשה. אחרי התשלום חוזרים לכאן, וההזמנה מתעדכנת לבד.' : 'הדפדפן חסם את פתיחת הלשונית. אפשר לפתוח את דף התשלום בכפתור.'}</p>
+      ${live.url ? `<a class="btn ${live.popup ? 'ghost' : 'primary'} block" href="${esc(live.url)}" target="_blank" rel="noopener">לפתיחת דף התשלום</a>` : ''}
+      <button class="btn ghost block" data-act="${backAct}">חזרה</button>
+    </div>`;
+  }
+
+  // קישור לקבלה המקורית של הספק (רק בסליקה אמיתית), במייל ללקוח
+  const receiptLinkHtml = url => (url ? `<p style="margin:12px 0"><a href="${esc(url)}" style="color:#7d3b1c;font-weight:bold">להורדת הקבלה המקורית (PDF)</a></p>` : '');
 
   // PDF של מסמך: /accounting/documents/getpdf/
   function sumitPdf(docNumber, html, title) {
