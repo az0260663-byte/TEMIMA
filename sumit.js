@@ -72,6 +72,8 @@
       if (!d || !d.live) return;
       Object.assign(PAY, { live: true, test: !!d.test, prices: d.prices, provider: d.provider, fixedLink: d.fixedLink || '' });
       applyPayPrices();
+      // לקוח שחזר מדף התשלום: ההזמנה שלו חוזרת, והאישור ממשיך מכאן
+      if (typeof payResume === 'function') payResume();
       render();
     } catch (e) { /* אין שרת: נשארים בדמו */ }
   }
@@ -85,7 +87,7 @@
   }
   /* פתיחת דף תשלום להזמנה. חייב לרוץ מתוך הלחיצה: הלשונית נפתחת מיד, והכתובת מגיעה מהשרת אחר כך.
      live: { ref, url, popup, error, since } נשמר אצל מי שקרא, ומוצג ב-liveWaitView */
-  function livePayStart(order, kind, n, live) {
+  function livePayStart(order, kind, n, live, opts = {}) {
     const client = { name: order.customer.name, email: order.customer.email, phone: order.customer.phone };
     // קישור קבוע: הקישור נפתח מיד, והשרת רושם מה לחפש (סכום, מייל, שם ושעה). הלקוח מקליד בדף את הסכום ואת אותו מייל
     if (PAY.fixedLink) {
@@ -95,10 +97,18 @@
       return payPost('watch', { ref: order.id, kind, n, coupon: order.coupon || '', client }).then(d => d)
         .catch(e => { live.error = e.message; throw e; });
     }
+    // באותה לשונית: עוברים לדף התשלום, ומורנינג מחזיר את הלקוח לאתר (דרך דף המעבר). opts.beforeLeave שומר את ההזמנה לרגע החזרה
+    if (opts.sameTab) {
+      Object.assign(live, { ref: order.id, url: '', popup: true, error: '', since: Date.now(), amount: order.amount, desc: order.desc, leaving: true });
+      log('sumit', `${PAY_PROVIDER[PAY.provider] || 'סליקה'}: מעבר לדף תשלום`, `${order.desc}, ${money(order.amount)}. אחרי התשלום הלקוח חוזר לאתר.`);
+      return payPost('start', { ref: order.id, kind, n, desc: order.desc, coupon: order.coupon || '', returnTo: location.origin + location.pathname, client })
+        .then(d => { live.url = d.url; if (opts.beforeLeave) opts.beforeLeave(); location.href = d.url; return d; })
+        .catch(e => { live.leaving = false; live.error = e.message; throw e; });
+    }
     const win = window.open('', '_blank');
     Object.assign(live, { ref: order.id, url: '', popup: !!win, error: '', since: Date.now(), amount: order.amount, desc: order.desc });
     log('sumit', `${PAY_PROVIDER[PAY.provider] || 'סליקה'}: נפתח דף תשלום אמיתי`, `${order.desc}, ${money(order.amount)}. מזהה ההזמנה: ${order.id}.`);
-    return payPost('start', { ref: order.id, kind, n, desc: order.desc, coupon: order.coupon || '', client: { name: order.customer.name, email: order.customer.email, phone: order.customer.phone } })
+    return payPost('start', { ref: order.id, kind, n, desc: order.desc, coupon: order.coupon || '', client })
       .then(d => { live.url = d.url; if (win) { try { win.opener = null; } catch (e) { /* לא נתמך */ } win.location.href = d.url; } return d; })
       .catch(e => { if (win) win.close(); live.error = e.message; throw e; });
   }
@@ -133,9 +143,9 @@
       <div class="sumit-head"><div><b>תשלום מאובטח</b><small>בדף של ${name}</small></div>${PAY.test ? '<span class="demo-badge">בדיקה: תשלום אמיתי, במחיר בדיקה</span>' : ''}</div>
       <div class="sumit-amount"><small>${esc(live.desc || '')}</small><b>${money(live.amount || 0)}</b></div>
       ${live.fixed ? `<div class="policy"><b>בדף התשלום חשוב להקליד:</b>סכום: <b>${money(live.amount || 0)}</b><br>מייל: <b dir="ltr">${esc(live.email || '')}</b><br>כך המערכת מזהה את התשלום שלך.</div>` : ''}
-      ${live.error ? `<p class="err" role="alert">${esc(live.error)}</p>` : `<p class="live-wait" role="status"><span class="spin" aria-hidden="true"></span>${live.url ? 'מחכים לאישור התשלום...' : 'פותחים את דף התשלום...'}</p>`}
-      <p class="hint">${live.popup ? 'דף התשלום נפתח בלשונית חדשה. אחרי התשלום חוזרים לכאן, וההזמנה מתעדכנת לבד.' : 'הדפדפן חסם את פתיחת הלשונית. אפשר לפתוח את דף התשלום בכפתור.'}</p>
-      ${live.url ? `<a class="btn ${live.popup ? 'ghost' : 'primary'} block" href="${esc(live.url)}" target="_blank" rel="noopener">לפתיחת דף התשלום</a>` : ''}
+      ${live.error ? `<p class="err" role="alert">${esc(live.error)}</p>` : `<p class="live-wait" role="status"><span class="spin" aria-hidden="true"></span>${live.url || live.returned ? 'מחכים לאישור התשלום...' : 'פותחים את דף התשלום...'}</p>`}
+      ${live.leaving || live.returned ? `<p class="hint">${live.returned ? 'חזרת מדף התשלום. מאשרים את התשלום מול מערכת הסליקה, זה לוקח כמה שניות.' : 'עוברים לדף התשלום המאובטח...'}</p>` : `<p class="hint">${live.popup ?'דף התשלום נפתח בלשונית חדשה. אחרי התשלום חוזרים לכאן, וההזמנה מתעדכנת לבד.' : 'הדפדפן חסם את פתיחת הלשונית. אפשר לפתוח את דף התשלום בכפתור.'}</p>
+      ${live.url ? `<a class="btn ${live.popup ? 'ghost' : 'primary'} block" href="${esc(live.url)}" target="_blank" rel="noopener">לפתיחת דף התשלום</a>` : ''}`}
       <button class="btn ghost block" data-act="${backAct}">חזרה</button>
     </div>`;
   }

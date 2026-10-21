@@ -194,6 +194,26 @@
 
   // ספירה לאחור של המועד השמור במסך התשלום. כשהזמן נגמר, המועד משתחרר
   // קופון שהופעל, והסכום אחריו (לפחות 1 ₪). בסליקה האמיתית השרת מחשב את אותו סכום בעצמו
+  /* חזרה מדף התשלום: מורנינג (דרך pay-return.html) מחזיר לכאן עם ?payret=<מזהה ההזמנה>.
+     ההזמנה שנשמרה לפני המעבר חוזרת, והשרת בודק מול מורנינג שהתשלום התקבל, כמו תמיד */
+  const PAY_RESUME = 'tamima-pay-resume';
+  function payResume() {
+    const q = new URLSearchParams(location.search);
+    const ref = q.get('payret');
+    if (!ref) return;
+    let saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem(PAY_RESUME) || 'null'); sessionStorage.removeItem(PAY_RESUME); } catch (e) { /* אין שמירה */ }
+    history.replaceState(null, '', location.pathname + '#/client/workshop');
+    if (!saved || saved.ref !== ref || Date.now() - saved.at > 60 * 60e3) return;
+    const w = Object.assign({}, saved.w, { status: 'pending', holdUntil: now().getTime() + HOLD_MIN * 6e4 });
+    S.workshops = S.workshops.filter(x => x.id !== w.id).concat(w);
+    Object.assign(bk, saved.bk, { hold: w.id });
+    if (q.get('payfail') === '1') { bk.live = null; bk.step = 'summary'; bk.err = 'התשלום לא הושלם. ההזמנה עדיין שמורה, ואפשר לנסות שוב.'; return; }
+    bk.step = 'pay';
+    bk.live = { ref, url: '', popup: true, error: '', since: Date.now(), amount: w.amount, desc: wsDesc(w), returned: true };
+    log('sumit', 'הלקוח חזר מדף התשלום', `${wsDesc(w)}. השרת בודק מול מערכת הסליקה שהתשלום התקבל.`);
+    livePoll(bk.live, id => { touchHold(w.id); A.bkFinish(id, ['check']); }, () => { touchHold(w.id); render(); });
+  }
   const bkCoupon = () => (bk.coupon && (S.settings.coupons || []).find(c => c.code === bk.coupon)) || null;
   const bkTotal = () => { const c = bkCoupon(), p = price(bk.n); return c ? Math.max(1, p - c.off) : p; };
   const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -419,8 +439,11 @@
         if (!stillBookable(w)) { expireOrder(w.id, true); bk.hold = null; bk.step = 'slot'; bk.time = null; bk.err = 'המועד כבר לא זמין, ולא בוצע חיוב. בחרו מועד אחר.'; render(); scrollTop(); return; }
         bk.live = {};
         bk.err = ''; bk.step = 'pay';
-        livePayStart({ id: w.id, customer: w.customer, amount: w.amount, desc: wsDesc(w), coupon: cp ? cp.code : '' }, 'workshop', w.n, bk.live)
-          .then(() => { render(); livePoll(bk.live, id => { touchHold(w.id); A.bkFinish(id, ['check']); }, () => { touchHold(w.id); render(); }); })
+        // דף תשלום להזמנה: באותה לשונית, ומורנינג מחזיר את הלקוח לאתר. ההזמנה נשמרת לרגע החזרה (רק בלשונית הזו)
+        const sameTab = !PAY.fixedLink;
+        const save = () => { try { sessionStorage.setItem(PAY_RESUME, JSON.stringify({ ref: w.id, w, bk: Object.assign({}, bk, { live: null }), at: Date.now() })); } catch (e) { /* בלי שמירה הלקוח יחזור למסך ההזמנה */ } };
+        livePayStart({ id: w.id, customer: w.customer, amount: w.amount, desc: wsDesc(w), coupon: cp ? cp.code : '' }, 'workshop', w.n, bk.live, { sameTab, beforeLeave: save })
+          .then(() => { if (sameTab) return; render(); livePoll(bk.live, id => { touchHold(w.id); A.bkFinish(id, ['check']); }, () => { touchHold(w.id); render(); }); })
           .catch(() => render());
         render(); scrollTop();
         return;

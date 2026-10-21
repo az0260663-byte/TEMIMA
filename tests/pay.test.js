@@ -56,9 +56,15 @@ const client = { name: 'מיכל בדיקה', email: 'michal@example.com', phone
   assert(f.pluginId === 'PL' && f.group === 100, 'נשלח המסוף הפעיל (לא הכבוי), עם תשלום בכרטיס אשראי');
   assert(f.client.name === client.name && f.client.emails[0] === client.email && f.client.phone === client.phone, 'פרטי הלקוח נשלחו מראש, כדי שלא יקליד אותם שוב');
 
+  // חזרה לאתר אחרי התשלום: דרך דף המעבר בגיטהאב (https), ורק לכתובות של הסטודיו
+  await call('/api/pay/start', { ref: 'ws_ret1', kind: 'workshop', n: 2, returnTo: 'http://localhost:8124/index.html', client });
+  const fr = mr.forms[mr.forms.length - 1];
+  assert(/^https:\/\/az0260663-byte\.github\.io\/TEMIMA\/pay-return\.html\?ref=ws_ret1&to=http%3A%2F%2Flocalhost%3A8124%2Findex\.html$/.test(fr.successUrl) && fr.failureUrl === fr.successUrl + '&fail=1', 'דף התשלום מחזיר לאתר שממנו הלקוח הגיע, דרך דף המעבר');
+  await call('/api/pay/start', { ref: 'ws_ret2', kind: 'workshop', n: 2, returnTo: 'https://evil.example/', client });
+  assert(!mr.forms[mr.forms.length - 1].successUrl, 'כתובת חזרה לאתר זר לא נשלחת');
   // קופון: השרת מחשב את ההנחה בעצמו, ולא פחות מ-1 ₪
   r = await call('/api/pay/start', { ref: 'ws_coupon', kind: 'workshop', n: 2, coupon: 'test679', client }); d = await r.json();
-  assert(r.ok && d.amount === 1 && mr.forms[1].amount === 1, 'קופון TEST679: הסכום בדף התשלום 1 ₪');
+  assert(r.ok && d.amount === 1 && mr.forms[mr.forms.length - 1].amount === 1, 'קופון TEST679: הסכום בדף התשלום 1 ₪');
   r = await call('/api/pay/start', { ref: 'ws_coupon2', kind: 'workshop', n: 2, coupon: 'FAKE', client });
   assert(r.status === 400, 'קופון לא קיים נדחה, ולא נפתח דף תשלום');
   r = await call('/api/pay/start', { ref: 'cp_coupon', kind: 'card', coupon: 'TEST679', client });

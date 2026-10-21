@@ -27,6 +27,8 @@ const REAL_PRICES = { price2: 680, pricePer: 300, cardPrice: 800 };
 const DOC_TYPE = 320; // חשבונית מס / קבלה
 // קופונים (כרגע רק לבדיקה). השרת מחשב את ההנחה בעצמו, ולא סומך על סכום מהדפדפן. לפחות 1 ₪ לתשלום
 const COUPONS = { TEST679: 679 };
+// לאן מורנינג מחזיר את הלקוח אחרי התשלום. חייב להיות https, ולכן דף מעבר באתר בגיטהאב שמחזיר לאתר שממנו הלקוח הגיע
+const RETURN_TO = /^(https:\/\/az0260663-byte\.github\.io\/TEMIMA\/|http:\/\/localhost:\d{2,5}\/)[\w./-]*$/;
 function withCoupon(amount, code) {
   const off = COUPONS[String(code || '').trim().toUpperCase()];
   return off ? Math.max(1, amount - off) : amount;
@@ -132,12 +134,16 @@ function payRoutes(opts = {}) {
       let d;
       try {
         const pl = await getPlugin();
-        d = await call('POST', '/payments/form', {
+        d = await call('POST', '/payments/form', Object.assign({
           // pluginId: המסוף. group 100 = כרטיס אשראי, חובה במסוף "תשלומים דיגיטליים" (Grow)
           description: desc, type: DOC_TYPE, amount, currency: 'ILS', vatType: 0, lang: 'he', maxPayments: 1, pluginId: pl.id, group: 100,
           client: Object.assign({ name }, /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? { emails: [email] } : {}, phone ? { phone } : {}),
           custom: ref
-        });
+        }, RETURN_TO.test(String(b.returnTo || '')) ? (() => {
+          const page = env.PAY_RETURN_PAGE || 'https://az0260663-byte.github.io/TEMIMA/pay-return.html';
+          const back = `${page}?ref=${encodeURIComponent(ref)}&to=${encodeURIComponent(b.returnTo)}`;
+          return { successUrl: back, failureUrl: back + '&fail=1' };
+        })() : {}));
       } catch (e) { return fail(e, 'לא הצלחנו לפתוח דף תשלום. נסו שוב בעוד רגע.'); }
       if (!d || !d.url) return [502, { error: d && d.errorDescription ? `מורנינג: ${clean(d.errorDescription, 200)}` : 'מורנינג לא החזיר דף תשלום.' }];
       pending.set(ref, { amount, kind, at: Date.now() });
