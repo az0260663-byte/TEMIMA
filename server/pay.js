@@ -48,6 +48,8 @@ function payRoutes(opts = {}) {
     mode: env.MORNING_ENV === 'sandbox' ? 'sandbox' : 'production'
   };
   const live = !!(cfg.id && cfg.secret);
+  // קישור תשלום קבוע (אופציונלי): אם הוגדר, הלקוחות משלמים בו, והשרת מזהה את התשלום לפי סכום, מייל ושעה
+  const fixedLink = /^https:\/\/[\w.-]+\/\S+$/.test(env.MORNING_FIXED_LINK || '') ? env.MORNING_FIXED_LINK : '';
   const base = BASE[cfg.mode];
 
   // כרטיס כניסה למורנינג: תקף לשעה, ונשמר בזיכרון עד דקה לפני שהוא פג
@@ -73,10 +75,30 @@ function payRoutes(opts = {}) {
 
   const pending = new Map(); // ref -> { amount, kind, at }
   const done = new Map();    // ref -> התוצאה, כדי לא לחפש שוב
+  const claimed = new Set(); // קבלות שכבר שויכו להזמנה, כדי שקבלה אחת לא תאשר שתי הזמנות
   const fail = (e, text) => { console.error('מורנינג:', e.message); return [502, { error: e.reason === 'no_api' ? 'בחשבון במורנינג אין גישה לחיבור מערכות (API). צריך מסלול שכולל אותו.' : text }]; };
 
   const routes = {
-    'GET /api/pay/config': async () => [200, live ? { live: true, provider: 'morning', env: cfg.mode, test: true, prices: TEST_PRICES } : { live: false }],
+    'GET /api/pay/config': async () => [200, live ? { live: true, provider: 'morning', env: cfg.mode, test: true, prices: TEST_PRICES, fixedLink } : { live: false }],
+
+    /* קישור קבוע: הלקוח לחץ "לתשלום" והקישור נפתח. כאן נרשם מה מחכים לו: סכום (מהשרת), מייל ושם, ומתי.
+       אחר כך /api/pay/check מחפש קבלה חדשה במורנינג עם אותו סכום ואותו מייל (או שם), שנוצרה אחרי הלחיצה */
+    'POST /api/pay/watch': async (req, b) => {
+      if (!live || !fixedLink) return [503, { error: 'אין קישור תשלום קבוע.' }];
+      const ref = String(b.ref || '');
+      if (!/^[\w-]{4,60}$/.test(ref)) return [400, { error: 'מזהה הזמנה לא תקין.' }];
+      const kind = b.kind === 'card' ? 'card' : b.kind === 'workshop' ? 'workshop' : '';
+      const base = amountFor(kind, Number(b.n));
+      if (!base) return [400, { error: 'סוג ההזמנה או מספר המשתתפים לא תקינים.' }];
+      if (b.coupon && (kind !== 'workshop' || !COUPONS[String(b.coupon).trim().toUpperCase()])) return [400, { error: 'הקופון לא תקין.' }];
+      const amount = kind === 'workshop' ? withCoupon(base, b.coupon) : base;
+      const c = b.client || {};
+      const email = clean(c.email, 120).toLowerCase(), name = clean(c.name, 80);
+      if (!email && !name) return [400, { error: 'חסרים מייל או שם.' }];
+      pending.set(ref, { amount, kind, at: Date.now(), fixed: true, email, name });
+      if (pending.size > 1000) pending.delete(pending.keys().next().value);
+      return [200, { url: fixedLink, amount }];
+    },
 
     'POST /api/pay/start': async (req, b) => {
       if (!live) return [503, { error: 'אין חיבור לסליקה.' }];
@@ -114,10 +136,20 @@ function payRoutes(opts = {}) {
       let found;
       try {
         // המסמכים שנוצרו מאתמול, ומתוכם זה של ההזמנה הזו (מזהה ההזמנה כתוב בתיאור)
-        const r = await call('POST', '/documents/search', { type: [DOC_TYPE], fromDate: day(now(), -1), page: 1, pageSize: 50 });
-        found = (r.items || []).find(x => String(x.description || '').includes(`הזמנה ${ref}`));
+        const r = await call('POST', '/documents/search', { type: [DOC_TYPE, 400], fromDate: day(now(), -1), page: 1, pageSize: 50 });
+        const items = r.items || [];
+        if (!p.fixed) found = items.find(x => String(x.description || '').includes(`הזמנה ${ref}`));
+        else {
+          // קישור קבוע: קבלה שנוצרה אחרי הלחיצה (עם שתי דקות מרווח לשעון), באותו סכום, לאותו מייל או שם, ושעוד לא שויכה להזמנה אחרת
+          const same = (a, b2) => a && b2 && String(a).trim().toLowerCase() === String(b2).trim().toLowerCase();
+          found = items
+            .filter(x => !claimed.has(String(x.id)) && Number(x.amount) === p.amount && Number(x.creationDate || 0) * 1000 >= p.at - 120e3)
+            .filter(x => { const cl = x.client || {}; return (p.email && (cl.emails || []).some(e => same(e, p.email))) || same(cl.name, p.name); })
+            .sort((a, b2) => Number(a.creationDate) - Number(b2.creationDate))[0];
+        }
       } catch (e) { return fail(e, 'לא הצלחנו לבדוק את התשלום כרגע.'); }
       if (!found) return [200, { paid: false }];
+      claimed.add(String(found.id));
       if (Number(found.amount) !== p.amount) return [200, { paid: false, mismatch: true, error: `הסכום במורנינג (${found.amount} ₪) שונה מהסכום של ההזמנה (${p.amount} ₪).` }];
       let receiptUrl = '';
       try { const l = await call('GET', `/documents/${encodeURIComponent(found.id)}/download/links`); receiptUrl = l.he || l.origin || ''; } catch (e) { /* הקבלה קיימת גם בלי קישור הורדה */ }

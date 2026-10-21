@@ -61,7 +61,7 @@
      כרגע הספק הוא מורנינג, במחירי בדיקה. בלי שרת (גיטהאב, הדמו המפורסם) הכל נשאר מדומה כמו קודם.
      דף התשלום נפתח בלשונית חדשה, והדף הזה שואל את השרת כל 3 שניות אם התשלום התקבל.
      תשלום שאומת נכנס לאותה נקודת אישור (confirmPayment) כמו כל תשלום, עם הסכום ומספר הקבלה מהספק. */
-  const PAY = { live: false, test: false, prices: null, provider: '' };
+  const PAY = { live: false, test: false, prices: null, provider: '', fixedLink: '' };
   const PAY_PROVIDER = { morning: 'מורנינג' };
   function applyPayPrices() { if (PAY.live && PAY.prices && S) Object.assign(S.settings, PAY.prices); }
   async function payDetect() {
@@ -70,7 +70,7 @@
       const r = await fetch('api/pay/config', { cache: 'no-store' });
       const d = r.ok ? await r.json() : null;
       if (!d || !d.live) return;
-      Object.assign(PAY, { live: true, test: !!d.test, prices: d.prices, provider: d.provider });
+      Object.assign(PAY, { live: true, test: !!d.test, prices: d.prices, provider: d.provider, fixedLink: d.fixedLink || '' });
       applyPayPrices();
       render();
     } catch (e) { /* אין שרת: נשארים בדמו */ }
@@ -86,6 +86,15 @@
   /* פתיחת דף תשלום להזמנה. חייב לרוץ מתוך הלחיצה: הלשונית נפתחת מיד, והכתובת מגיעה מהשרת אחר כך.
      live: { ref, url, popup, error, since } נשמר אצל מי שקרא, ומוצג ב-liveWaitView */
   function livePayStart(order, kind, n, live) {
+    const client = { name: order.customer.name, email: order.customer.email, phone: order.customer.phone };
+    // קישור קבוע: הקישור נפתח מיד, והשרת רושם מה לחפש (סכום, מייל, שם ושעה). הלקוח מקליד בדף את הסכום ואת אותו מייל
+    if (PAY.fixedLink) {
+      const fw = window.open(PAY.fixedLink, '_blank');
+      Object.assign(live, { ref: order.id, url: PAY.fixedLink, popup: !!fw, error: '', since: Date.now(), amount: order.amount, desc: order.desc, fixed: true, email: client.email, name: client.name });
+      log('sumit', 'מורנינג: נפתח קישור התשלום הקבוע', `${order.desc}, ${money(order.amount)}. השרת יזהה את התשלום לפי הסכום, המייל (${client.email}) והשעה.`);
+      return payPost('watch', { ref: order.id, kind, n, coupon: order.coupon || '', client }).then(d => d)
+        .catch(e => { live.error = e.message; throw e; });
+    }
     const win = window.open('', '_blank');
     Object.assign(live, { ref: order.id, url: '', popup: !!win, error: '', since: Date.now(), amount: order.amount, desc: order.desc });
     log('sumit', `${PAY_PROVIDER[PAY.provider] || 'סליקה'}: נפתח דף תשלום אמיתי`, `${order.desc}, ${money(order.amount)}. מזהה ההזמנה: ${order.id}.`);
@@ -109,7 +118,7 @@
     let busy = false;
     livePollT = setInterval(async () => {
       if (busy) return;
-      if (Date.now() - live.since > 15 * 60e3) { clearInterval(livePollT); live.error = 'לא התקבל תשלום ב-15 הדקות האחרונות. אפשר לנסות שוב.'; onChange(); return; }
+      if (Date.now() - live.since > 15 * 60e3) { clearInterval(livePollT); live.error = live.fixed ? 'לא מצאנו תשלום ב-15 הדקות האחרונות. אם כבר שילמת, ייתכן שבדף התשלום הוקלדו סכום או מייל אחרים. כדאי לפנות לתמימה.' : 'לא התקבל תשלום ב-15 הדקות האחרונות. אפשר לנסות שוב.'; onChange(); return; }
       busy = true;
       try { const id = await livePayCheck(live.ref); if (id) { clearInterval(livePollT); onPaid(id); } else if (live.error) { live.error = ''; onChange(); } }
       catch (e) { if (live.error !== e.message) { live.error = e.message; onChange(); } }
@@ -123,6 +132,7 @@
     return `<div class="sumit live-pay">
       <div class="sumit-head"><div><b>תשלום מאובטח</b><small>בדף של ${name}</small></div>${PAY.test ? '<span class="demo-badge">בדיקה: תשלום אמיתי, במחיר בדיקה</span>' : ''}</div>
       <div class="sumit-amount"><small>${esc(live.desc || '')}</small><b>${money(live.amount || 0)}</b></div>
+      ${live.fixed ? `<div class="policy"><b>בדף התשלום חשוב להקליד:</b>סכום: <b>${money(live.amount || 0)}</b><br>מייל: <b dir="ltr">${esc(live.email || '')}</b><br>כך המערכת מזהה את התשלום שלך.</div>` : ''}
       ${live.error ? `<p class="err" role="alert">${esc(live.error)}</p>` : `<p class="live-wait" role="status"><span class="spin" aria-hidden="true"></span>${live.url ? 'מחכים לאישור התשלום...' : 'פותחים את דף התשלום...'}</p>`}
       <p class="hint">${live.popup ? 'דף התשלום נפתח בלשונית חדשה. אחרי התשלום חוזרים לכאן, וההזמנה מתעדכנת לבד.' : 'הדפדפן חסם את פתיחת הלשונית. אפשר לפתוח את דף התשלום בכפתור.'}</p>
       ${live.url ? `<a class="btn ${live.popup ? 'ghost' : 'primary'} block" href="${esc(live.url)}" target="_blank" rel="noopener">לפתיחת דף התשלום</a>` : ''}

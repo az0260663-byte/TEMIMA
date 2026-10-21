@@ -89,6 +89,36 @@ const client = { name: 'מיכל בדיקה', email: 'michal@example.com', phone
   r = await call('/api/pay/start', { ref: 'cp_test3', kind: 'card', client }); d = await r.json();
   assert(r.ok && d.amount === 4 && mr.tokens === 2, 'כרטיס כניסה שפג: מתחדש לבד, ודף התשלום לכרטיסייה נפתח (4 ₪)');
 
+  // ---------- קישור תשלום קבוע: זיהוי לפי סכום, מייל ושעה ----------
+  process.env.MORNING_CLIENT_ID = 'CID'; process.env.MORNING_CLIENT_SECRET = 'SEC'; process.env.MORNING_FIXED_LINK = 'https://mrng.to/FIXED';
+  const app2 = createApp({ clientId: 'G', clientSecret: 'GS', dataDir, envFile: path.join(dataDir, 'none'), payFetch: fakeMorning });
+  process.env.MORNING_CLIENT_ID = prev.id || ''; process.env.MORNING_CLIENT_SECRET = prev.sec || ''; delete process.env.MORNING_FIXED_LINK;
+  const srv2 = http.createServer(app2).listen(0);
+  const base2 = `http://localhost:${srv2.address().port}`;
+  const call2 = (p, body) => fetch(base2 + p, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-Tamima': '1', Origin: base2 }, body: body ? JSON.stringify(body) : undefined });
+  r = await call2('/api/pay/config'); d = await r.json();
+  assert(d.fixedLink === 'https://mrng.to/FIXED', 'הקישור הקבוע מוגדר בשרת');
+  const t0 = Math.floor(Date.now() / 1000);
+  r = await call2('/api/pay/watch', { ref: 'ws_fix1', kind: 'workshop', n: 2, coupon: 'TEST679', client: { name: 'יעל קבוע', email: 'Yael@Example.com' } }); d = await r.json();
+  assert(r.ok && d.amount === 1 && d.url === 'https://mrng.to/FIXED', 'לחיצה על "לתשלום": השרת רושם שמחכים ל-1 ₪ מהמייל הזה');
+  await call2('/api/pay/watch', { ref: 'ws_fix2', kind: 'workshop', n: 2, coupon: 'TEST679', client: { name: 'דנה אחרת', email: 'dana@example.com' } });
+  mr.docs = [
+    { id: 'old', number: 1, amount: 1, creationDate: t0 - 3600, client: { name: 'יעל קבוע', emails: ['yael@example.com'] } },     // לפני הלחיצה
+    { id: 'wrongAmt', number: 2, amount: 5, creationDate: t0 + 10, client: { name: 'יעל קבוע', emails: ['yael@example.com'] } },  // סכום אחר
+    { id: 'other', number: 3, amount: 1, creationDate: t0 + 20, client: { name: 'מישהו', emails: ['someone@example.com'] } }       // מייל אחר
+  ];
+  r = await call2('/api/pay/check', { ref: 'ws_fix1' }); d = await r.json();
+  assert(d.paid === false, 'קבלה ישנה, בסכום אחר או ממייל אחר: לא נחשבת תשלום של ההזמנה');
+  mr.docs.push({ id: 'yes', number: 40001, amount: 1, creationDate: t0 + 30, client: { name: 'Yael', emails: ['yael@example.com'] } });
+  r = await call2('/api/pay/check', { ref: 'ws_fix1' }); d = await r.json();
+  assert(d.paid && d.number === '40001' && d.receiptUrl, 'תשלום בקישור הקבוע זוהה לבד: אותו סכום, אותו מייל, אחרי הלחיצה');
+  r = await call2('/api/pay/check', { ref: 'ws_fix2' }); d = await r.json();
+  assert(d.paid === false, 'אותה קבלה לא מאשרת הזמנה של לקוח אחר');
+  r = await call2('/api/pay/watch', { ref: 'ws_fix3', kind: 'workshop', n: 2, coupon: 'TEST679', client: { name: 'יעל קבוע', email: 'yael@example.com' } }); d = await r.json();
+  const r3 = await (await call2('/api/pay/check', { ref: 'ws_fix3' })).json();
+  assert(d.amount === 1 && r3.paid === false, 'הזמנה שנייה של אותה לקוחה: קבלה שכבר שויכה לא נספרת שוב');
+  srv2.close();
+
   srv.close();
   fs.rmSync(dataDir, { recursive: true, force: true });
 })().catch(e => { console.error(e); process.exitCode = 1; srv.close(); });
