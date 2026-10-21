@@ -1417,16 +1417,17 @@
     const rs = roster(sel);
     const done = rs.regs.filter(s => a.rec[s.id]).length;
 
-    const opts = [['arrived', 'הגיע'], ['cancelled', 'ביטול בזמן'], ['late', 'ביטול מאוחר']];
+    // שני כפתורים בלבד. "לא הגיע" שואל שאלה אחת: הייתה הודעה בזמן? (השלמה) או לא (נספר בכרטיסייה)
     const rows = rs.regs.map(s => {
       const ps = payStatus(s);
       const cr = openCredits(s).length;
+      const v = a.rec[s.id], away = v === 'cancelled' || v === 'late';
       return `<div class="srow">
         <button class="srow-main" data-act="studentSheet" data-id="${s.id}">
           <b>${esc(s.name)}</b>
-          <span class="srow-meta"><span class="punch">כרטיסייה ${s.used}/${S.settings.cardSize}</span>${chip(ps.label, ps.key)}${cr ? chip(`השלמה פתוחה`, 'muted') : ''}</span>
+          <span class="srow-meta"><span class="punch">כרטיסייה ${s.used}/${S.settings.cardSize}</span>${chip(ps.label, ps.key)}${cr ? chip(`השלמה פתוחה`, 'muted') : ''}${v === 'cancelled' ? chip('הודעה בזמן', 'requested') : v === 'late' ? chip('בלי הודעה בזמן', 'overdue') : ''}</span>
         </button>
-        <div class="seg att">${opts.map(([v, l]) => `<button class="${a.rec[s.id] === v ? 'on on-' + v : ''}" data-act="mark" data-l="${sel.id}" data-s="${s.id}" data-v="${v}" ${canMark ? '' : 'disabled'}>${l}</button>`).join('')}</div>
+        <div class="seg att"><button class="${v === 'arrived' ? 'on on-arrived' : ''}" data-act="mark" data-l="${sel.id}" data-s="${s.id}" data-v="arrived" aria-pressed="${v === 'arrived'}" ${canMark ? '' : 'disabled'}>הגיע</button><button class="${away ? `on on-${v}` : ''}" data-act="absentAsk" data-l="${sel.id}" data-s="${s.id}" aria-pressed="${away}" aria-haspopup="dialog" ${canMark ? '' : 'disabled'}>לא הגיע</button></div>
       </div>`;
     }).join('');
     const guests = rs.guests.map(({ s }) => `<div class="srow guest">
@@ -1712,6 +1713,17 @@
     goLesson(d) { const l = lesson(d.l); ui.lessonSel[l.groupId] = l.id; location.hash = `#/tamima/classes/${l.groupId}`; },
     selLesson(d) { ui.lessonSel[d.g] = d.l; render(); },
     mark(d) { setAtt(d.l, d.s, d.v); render(); },
+    // "לא הגיע": שאלה אחת, והתשובה קובעת אם יש השלמה או שהשיעור נספר
+    absentAsk(d) {
+      const s = student(d.s), cur = att(d.l).rec[d.s], h = S.settings.lessonCancelHours;
+      const opt = (v, title, text) => `<button class="choice${cur === v ? ' on' : ''}" data-act="absentSet" data-l="${d.l}" data-s="${d.s}" data-v="${v}" aria-pressed="${cur === v}"><b>${title}</b><small>${text}</small></button>`;
+      openSheet(() => `<h2>${esc(s.name)}: היעדרות מהשיעור</h2><p class="muted">הייתה הודעה מראש?</p>
+        <div class="choice-list">
+          ${opt('cancelled', `כן, הודעה בזמן (יותר מ-${h} שעות לפני)`, creditEligible(s) || cur === 'cancelled' ? 'השיעור לא נספר בכרטיסייה, ותהיה השלמה בקבוצה אחרת.' : 'השיעור לא נספר בכרטיסייה. החודש כבר נוצלה השלמה, ולכן לא תהיה השלמה נוספת.')}
+          ${opt('late', 'לא, או הודעה מאוחרת', 'השיעור נספר בכרטיסייה, ואין השלמה.')}
+        </div>`);
+    },
+    absentSet(d) { setAtt(d.l, d.s, d.v); closeSheet(); render(); snack(d.v === 'cancelled' ? 'סומן: הודעה בזמן.' : 'סומן: נספר בכרטיסייה.'); },
     markAll(d) { const l = lesson(d.l); const a = att(l.id); lessonStudents(l).forEach(s => { if (!a.rec[s.id]) setAtt(l.id, s.id, 'arrived'); }); roster(l).guests.forEach(({ s }) => { if (!a.rec[s.id]) setAtt(l.id, s.id, 'arrived'); }); render(); },
     maxSeat(d) { const g = group(d.g); g.max = Math.min(12, Math.max(groupStudents(g.id).length, g.max + Number(d.d))); render(); },
     week(d) { ui.weekOffset = Number(d.d) === 0 ? 0 : ui.weekOffset + Number(d.d); render(); },
