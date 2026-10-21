@@ -100,6 +100,7 @@
         <div class="foot-inner">
           <div class="brand light"><span class="logo" aria-hidden="true">ת</span><span><b>הסטודיו של תמימה</b><small>סטודיו לקרמיקה</small></span></div>
           <div><small>איפה</small><p>${esc(S.content.address)}</p></div>
+          <div><small>טלפון</small><p><a href="tel:${esc(String(S.settings.whatsapp || '').replace(/\D/g, ''))}" dir="ltr">${esc(S.settings.whatsapp || '')}</a></p></div>
           <div><small>חוגים</small><p>${esc(classHoursText())}</p></div>
         </div>
         <nav class="foot-links" aria-label="מידע משפטי"><a href="#/client/accessibility">הצהרת נגישות</a><a href="#/client/privacy">מדיניות פרטיות</a></nav>
