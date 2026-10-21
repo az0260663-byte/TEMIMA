@@ -1279,3 +1279,7 @@ ul.cal-legend { list-style: none; padding: 0; margin: 12px 0 0; }
 .live-pay .live-wait { display: flex; align-items: center; gap: 10px; justify-content: center; font-weight: 600; margin: 14px 0 6px; }
 .live-pay .live-wait .spin { width: 20px; height: 20px; }
 .live-pay .hint { text-align: center; }
+
+/* קוד קופון בסיכום ההזמנה */
+.coupon-row { display: flex; align-items: flex-end; gap: 10px; margin: 6px 0 12px; }
+.coupon-row .field { flex: 1; margin: 0; }

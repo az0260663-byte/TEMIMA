@@ -19,5 +19,8 @@ window.TAMIMA_CONFIG = {
   googleClientId: '329242531588-mbv6kie5i8l05p83o4dcdijgcqs0p4tv.apps.googleusercontent.com',
   liveEmail: false,
   backend: 'auto',
+  // קישור תשלום קבוע לבדיקה (מורנינג, הלקוח מקליד את הסכום). ריק = דף תשלום מדומה.
+  // קישור קבוע לא מודיע למערכת שהתשלום עבר: אחרי "שילמתי" ההזמנה נשמרת כ"שולמה, לא אומתה"
+  fixedPayLink: 'https://mrng.to/mFCI5vAwCM',
   startData: 'demo'
 };

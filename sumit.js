@@ -42,7 +42,7 @@
   function sumitGetPayment(id) {
     if (!PAY.live) sumitLog('סאמיט: אימות התשלום', 'POST', '/billing/payments/get/', { PaymentID: id });
     const p = sumitStore().payments[id];
-    return p ? { PaymentID: p.id, ValidPayment: p.valid, Amount: p.amount, DocumentNumber: p.doc, DocumentID: p.docId, CustomerID: p.customerId, ExternalIdentifier: p.ref, ReceiptUrl: p.receiptUrl || '' } : null;
+    return p ? { PaymentID: p.id, ValidPayment: p.valid, Amount: p.amount, DocumentNumber: p.doc, DocumentID: p.docId, CustomerID: p.customerId, ExternalIdentifier: p.ref, ReceiptUrl: p.receiptUrl || '', Unverified: !!p.unverified } : null;
   }
 
   /* מסמך מתוך המערכת (קבלה לסדנה מערוץ שיווק): /accounting/documents/create/

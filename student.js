@@ -136,7 +136,8 @@
     const hist = S.payments.filter(p => p.studentId === s.id).sort((a, b) => b.date.localeCompare(a.date));
     return `<h1>תשלומים</h1>
       ${stuPayCard(s)}
-      ${card(`<h2>היסטוריה</h2>${hist.map(p => `<button class="ws-row" data-act="stuInvoice" data-id="${p.id}"><span class="dot dot-paid"></span>
+      ${card(`<h2>היסטוריה</h2>${hist.map(p => p.unverified ? `<div class="ws-row"><span class="dot dot-paid"></span>
+        <div><b>כרטיסייה, 4 שיעורים</b><small>${dmy(p.date)}.${parse(p.date).getFullYear()} · ${money(p.amount)}</small></div>${chip('ממתין לאישור תמימה', 'requested')}</div>` : `<button class="ws-row" data-act="stuInvoice" data-id="${p.id}"><span class="dot dot-paid"></span>
         <div><b>כרטיסייה, 4 שיעורים</b><small>${dmy(p.date)}.${parse(p.date).getFullYear()} · ${money(p.amount)}</small></div><span class="go">חשבונית מס קבלה</span></button>${pdfBtn(p.invoice)}${refundLines(p.invoice)}`).join('') || empty('אין תשלומים עדיין.')}`)}
       ${card(`<h2>מדיניות ביטולים</h2>${s.policy ? `<p class="ok-line">✓ אישרת ב-${fullDate(s.policy.date)}</p>` : '<p>עוד לא אישרת את המדיניות.</p>'}<a class="btn ghost block" href="#/student/policy">${s.policy ? 'למדיניות' : 'לקריאה ואישור'}</a>`)}
       ${privacyCard(s)}
@@ -162,6 +163,21 @@
     const first = s.firstDue;
     // סליקה אמיתית: הלקוח משלם בלשונית אחרת, וכאן מחכים לאישור
     if (ui.stuLive && s.payOrder && ui.stuLive.ref === s.payOrder.id) return '<h1 class="sr-only">תשלום</h1>' + liveWaitView(ui.stuLive, 'stuPayBack');
+    // קישור תשלום קבוע (בדיקה): משלמים בלשונית אחרת, ואז "שילמתי"
+    if (!PAY.live && CFG.fixedPayLink) {
+      const opened = ui.stuFixed === s.id;
+      return `<h1 class="sr-only">תשלום</h1><div class="sumit live-pay">
+        <div class="sumit-head"><div><b>תשלום מאובטח</b><small>בדף של מורנינג</small></div><span class="demo-badge">בדיקה: קישור תשלום קבוע</span></div>
+        <div class="sumit-amount"><small>כרטיסייה, ${S.settings.cardSize} שיעורים · בדף התשלום מקלידים את הסכום</small><b>${money(S.settings.cardPrice)}</b></div>
+        ${first ? `<div class="policy-box">${policyHtml()}${policyCheck()}</div>` : ''}
+        ${opened ? `<p class="hint">דף התשלום נפתח בלשונית חדשה. אחרי התשלום חוזרים לכאן ולוחצים "שילמתי".</p>
+          <button class="btn primary block" data-act="stuFixedPaid">שילמתי</button>
+          <button class="btn ghost block" data-act="stuFixedOpen">לפתיחת דף התשלום שוב</button>`
+          : `<button class="btn primary block" data-act="stuFixedOpen" ${first && !(ui.pol && ui.pol.ok) ? 'disabled' : ''}>לתשלום ${money(S.settings.cardPrice)}</button>`}
+        <button class="btn ghost block" data-act="stuPayBack">חזרה</button>
+        <p class="muted small">בבדיקה הזו המערכת לא יודעת לבד שהתשלום עבר. התשלום יישמר כ"לא אומת", ותמימה תבדוק אותו במורנינג.</p>
+      </div>`;
+    }
     return '<h1 class="sr-only">תשלום</h1>' + sumitView(S.settings.cardPrice, 'כרטיסייה, 4 שיעורים', 'stuPay', 'stuPayBack', null,
       first ? `<div class="policy-box">${policyHtml()}${policyCheck()}</div>` : '', { payDisabled: first && !(ui.pol && ui.pol.ok) });
   }
@@ -256,7 +272,28 @@
       ui.stuMsg = opens ? `התשלום התקבל, והאזור האישי פתוח. חשבונית מס קבלה מס׳ ${inv} והקישור האישי נשלחו למייל.` : `התשלום התקבל. חשבונית מס קבלה מס׳ ${inv} נשלחה למייל.`;
       location.hash = opens ? '#/student/home' : '#/student/payments'; flashClear();
     },
-    stuPayBack() { if (ui.stuLive) { livePollStop(); ui.stuLive = null; render(); return; } history.back(); },
+    stuFixedOpen() {
+      const s = me();
+      if (s.firstDue && !(ui.pol && ui.pol.ok)) { ui.stuMsg = 'כדי לשלם צריך לאשר את מדיניות הביטולים.'; render(); return; }
+      window.open(CFG.fixedPayLink, '_blank', 'noopener');
+      ui.stuFixed = s.id;
+      log('sumit', 'מורנינג: נפתח קישור תשלום קבוע', `${s.name}, כרטיסייה, ${money(S.settings.cardPrice)}. בקישור קבוע המערכת לא מקבלת אישור על התשלום.`);
+      render();
+    },
+    stuFixedPaid() {
+      const s = me();
+      if (s.firstDue) s.policy = { date: todayIso(), version: S.settings.policyVersion };
+      const opens = isLocked(s);
+      s.payOrder = { id: uid('cp'), amount: S.settings.cardPrice };
+      const id = `fix_${token().slice(0, 10)}`;
+      sumitStore().payments[id] = { id, ref: s.payOrder.id, amount: s.payOrder.amount, valid: true, doc: null, docId: null, customerId: '', unverified: true };
+      ui.stuFixed = null;
+      const res = confirmPayment(id, 'fixed');
+      if (res.result !== 'confirmed') { ui.stuMsg = 'לא הצלחנו לרשום את התשלום. אפשר לנסות שוב.'; render(); return; }
+      ui.stuMsg = opens ? 'התשלום נרשם, והאזור האישי פתוח. תמימה תאשר את התשלום אחרי בדיקה, והקבלה תישלח ממערכת הסליקה.' : 'התשלום נרשם. תמימה תאשר אותו אחרי בדיקה, והקבלה תישלח ממערכת הסליקה.';
+      location.hash = opens ? '#/student/home' : '#/student/payments'; flashClear();
+    },
+    stuPayBack() { if (ui.stuFixed) { ui.stuFixed = null; render(); return; } if (ui.stuLive) { livePollStop(); ui.stuLive = null; render(); return; } history.back(); },
     stuPolicyApprove() {
       const s = me();
       if (!(ui.pol && ui.pol.ok)) return;
