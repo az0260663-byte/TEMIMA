@@ -73,10 +73,22 @@ function payRoutes(opts = {}) {
     }
   }
 
+  // מסוף הסליקה: חייבים לשלוח אותו במפורש. השרת מוצא לבד את המסוף הפעיל שמקבל כרטיס אשראי (או MORNING_PLUGIN_ID)
+  let plugin = null;
+  async function getPlugin() {
+    if (plugin) return plugin;
+    if (env.MORNING_PLUGIN_ID) return (plugin = { id: env.MORNING_PLUGIN_ID, groups: [100] });
+    const d = await call('GET', `/documents/info?type=${DOC_TYPE}`);
+    const list = (d && d.paymentPlugins) || [];
+    const p = list.find(x => x.active && (x.groups || []).includes(100)) || list.find(x => x.active);
+    if (!p) { const e = new Error('no active plugin'); e.reason = 'no_plugin'; throw e; }
+    return (plugin = { id: p.id, groups: p.groups || [] });
+  }
+
   const pending = new Map(); // ref -> { amount, kind, at }
   const done = new Map();    // ref -> התוצאה, כדי לא לחפש שוב
   const claimed = new Set(); // קבלות שכבר שויכו להזמנה, כדי שקבלה אחת לא תאשר שתי הזמנות
-  const fail = (e, text) => { console.error('מורנינג:', e.message); return [502, { error: e.reason === 'no_api' ? 'בחשבון במורנינג אין גישה לחיבור מערכות (API). צריך מסלול שכולל אותו.' : text }]; };
+  const fail = (e, text) => { console.error('מורנינג:', e.message); return [502, { error: e.reason === 'no_api' ? 'בחשבון במורנינג אין גישה לחיבור מערכות (API). צריך מסלול שכולל אותו.' : e.reason === 'no_plugin' ? 'בחשבון במורנינג אין מסוף סליקה פעיל.' : text }]; };
 
   const routes = {
     'GET /api/pay/config': async () => [200, live ? { live: true, provider: 'morning', env: cfg.mode, test: true, prices: TEST_PRICES, fixedLink } : { live: false }],
@@ -115,8 +127,10 @@ function payRoutes(opts = {}) {
       const desc = `${clean(b.desc, 120) || (kind === 'card' ? 'כרטיסייה' : 'סדנה')} · הזמנה ${ref}`;
       let d;
       try {
+        const pl = await getPlugin();
         d = await call('POST', '/payments/form', {
-          description: desc, type: DOC_TYPE, amount, currency: 'ILS', vatType: 0, lang: 'he', maxPayments: 1,
+          // pluginId: המסוף. group 100 = כרטיס אשראי, חובה במסוף "תשלומים דיגיטליים" (Grow)
+          description: desc, type: DOC_TYPE, amount, currency: 'ILS', vatType: 0, lang: 'he', maxPayments: 1, pluginId: pl.id, group: 100,
           client: Object.assign({ name }, /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? { emails: [email] } : {}, phone ? { phone } : {}),
           custom: ref
         });

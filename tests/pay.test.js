@@ -20,6 +20,7 @@ const fakeMorning = async (url, opts = {}) => {
   const auth = (opts.headers || {}).Authorization || '';
   if (!auth.startsWith('Bearer T') || (mr.expired && auth === 'Bearer T1')) return res(401, {});
   const p = url.replace('https://api.greeninvoice.co.il/api/v1', '');
+  if (p.startsWith('/documents/info')) return res(200, { paymentPlugins: [{ id: 'OFF', active: false, groups: [100] }, { id: 'PL', active: true, groups: [100, 120] }] });
   if (p === '/payments/form') { mr.forms.push(body); return res(201, { success: true, errorCode: 0, url: `https://pay.example/${mr.forms.length}` }); }
   if (p === '/documents/search') return res(200, { total: mr.docs.length, items: mr.docs });
   const m = p.match(/^\/documents\/([^/]+)\/download\/links$/);
@@ -50,6 +51,7 @@ const client = { name: 'מיכל בדיקה', email: 'michal@example.com', phone
   const f = mr.forms[0];
   assert(r.ok && d.url === 'https://pay.example/1' && d.amount === 3, 'נפתח דף תשלום להזמנה, עם כתובת');
   assert(f.amount === 3 && f.type === 320 && f.currency === 'ILS' && f.custom === 'ws_test1' && f.description.includes('הזמנה ws_test1'), 'לדף נשלחו הסכום מהשרת (לא 0.01 מהדפדפן), חשבונית מס קבלה ומזהה ההזמנה');
+  assert(f.pluginId === 'PL' && f.group === 100, 'נשלח המסוף הפעיל (לא הכבוי), עם תשלום בכרטיס אשראי');
   assert(f.client.name === client.name && f.client.emails[0] === client.email && f.client.phone === client.phone, 'פרטי הלקוח נשלחו מראש, כדי שלא יקליד אותם שוב');
 
   // קופון: השרת מחשב את ההנחה בעצמו, ולא פחות מ-1 ₪
