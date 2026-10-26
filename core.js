@@ -44,9 +44,10 @@
     S.makeups.forEach(m => { if ((parse(m.expires) - startOfToday()) / 864e5 <= 7) m.warned = true; });
     S.conflictsDismissed = [];
     S.conflictsSeen = typeof conflicts === 'function' ? conflicts().map(c => c.key) : [];
-    bk = { step: 'slot', n: 2, date: null, time: null, name: '', phone: '', email: '', err: '', errField: '', marketing: false, done: null };
+    bk = { step: 'slot', n: 2, date: null, time: null, name: '', phone: '', email: '', err: '', errField: '', marketing: false, terms: false, done: null };
     lead = { name: '', phone: '', email: '', group: '', sent: false, err: '', errField: '', marketing: false };
     ui.accForm = { name: '', contact: '', text: '', sent: false, err: '', errField: '' };
+    ui.cnlForm = { name: '', phone: '', what: '', sent: false, err: '', errField: '' };
     Object.assign(ui, { sheet: null, weekOffset: 0, lessonSel: {}, rcpt: null, stuMsg: null });
     // סליקה אמיתית במחירי בדיקה: המחירים מוחלפים גם אחרי איפוס
     if (typeof applyPayPrices === 'function') applyPayPrices();
@@ -767,6 +768,8 @@
     customerCancel: ['תמימה', 'ביטול סדנה מ"ההזמנה שלי"'],
     lateRequest: ['תמימה', 'פנייה מאוחרת לביטול'],
     privacyRequest: ['תמימה', 'בקשת עיון או מחיקה'],
+    accessibilityRequest: ['תמימה', 'פנייה בנושא נגישות'],
+    cancelRequest: ['תמימה', 'בקשה לביטול עסקה מהאתר'],
     leaveAlert: ['תמימה', 'הודעת עזיבה של סטודנט'],
     newLead: ['תמימה', 'פנייה חדשה לקורס'],
     conflict: ['תמימה', 'התנגשות ביומן'],

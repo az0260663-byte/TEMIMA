@@ -1283,3 +1283,8 @@ ul.cal-legend { list-style: none; padding: 0; margin: 12px 0 0; }
 /* קוד קופון בסיכום ההזמנה */
 .coupon-row { display: flex; align-items: flex-end; gap: 10px; margin: 6px 0 12px; }
 .coupon-row .field { flex: 1; margin: 0; }
+
+/* פוטר האתר: פרטי העסק (חוק הגנת הצרכן) וקישורי החובה */
+.site-foot .foot-biz { max-width: 1120px; margin: 20px auto 0; font-size: .85rem; color: #eadccf; line-height: 1.7; }
+.site-foot .foot-biz a { color: #fff; }
+.site-foot .foot-links { flex-wrap: wrap; row-gap: 8px; }

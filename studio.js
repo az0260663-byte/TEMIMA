@@ -2047,16 +2047,6 @@
     // נגישות
     skipToMain() { focusMain(); },
     toggleMotion() { ui.motionOff = !ui.motionOff; document.body.classList.toggle('motion-off', ui.motionOff); render(); ui.focusSel = '[data-act="toggleMotion"]'; focusPending(); },
-    accSend() {
-      const f = ui.accForm;
-      f.err = ''; f.errField = '';
-      if (f.name.trim().length < 2) { f.err = 'נא למלא שם.'; f.errField = 'name'; }
-      else if (f.contact.trim().length < 5) { f.err = 'נא למלא טלפון או מייל לחזרה.'; f.errField = 'contact'; }
-      else if (f.text.trim().length < 5) { f.err = 'נא לתאר בקצרה מה לא עבד.'; f.errField = 'text'; }
-      else { f.sent = true; log('notify', 'פנייה בנושא נגישות', `${f.name.trim()}: ${f.text.trim()}`); }
-      if (f.errField) ui.focusSel = `[data-bind="accForm.${f.errField}"]`;
-      render();
-    },
     newSlotForm() {
       const days = nsfDays();
       if (!ui.nsf || !days.includes(ui.nsf.date)) ui.nsf = { date: ui.calDay && days.includes(ui.calDay) ? ui.calDay : days[0], time: '', ch: HOME };
