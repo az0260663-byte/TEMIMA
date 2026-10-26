@@ -156,7 +156,10 @@
       + '<h2>קורס שבועי</h2>'
       + '<ul class="doc-list">'
       + '<li>אפשר לבטל את ההרשמה לקורס בתוך 14 יום מיום העסקה, לפי חוק הגנת הצרכן. במקרה כזה מחזירים את מה ששולם, בניכוי השיעורים שכבר התקיימו.</li>'
-      + '<li>אחרי 14 הימים חלה מדיניות הביטולים של הקורס, שהסטודנט מאשר לפני התשלום הראשון.</li>'
+      + '<li>הקורס הוא התחייבות לשלושה חודשים לפחות. אחריהם אפשר להפסיק בהודעה בכתב, חודש לפני מועד הסיום.</li>'
+      + '<li>התשלום לפי כרטיסייה של ' + st.cardSize + ' שיעורים (' + money(st.cardPrice) + ', כולל מע"מ). בסיום הקורס אין תשלום נוסף מעבר לשיעורים שעד מועד הסיום.</li>'
+      + '<li>היעדרות: עדכון עד 24 שעות לפני השיעור מאפשר השלמה בתוך חודש (שיעור אחד בחודש). עדכון מאוחר יותר, או בלי עדכון, נספר כשיעור שנוצל.</li>'
+      + '<li>מדיניות הביטולים המלאה של הקורס מוצגת שוב, ומאושרת, לפני התשלום הראשון.</li>'
       + '</ul>'
 
       + '<h2>נגישות ופרטיות</h2>'
@@ -522,7 +525,7 @@
         ${consentBlock('lead', lead, 'נשתמש בפרטים רק כדי לחזור אליך לגבי הקורס.')}
         <button class="btn primary block" data-act="leadSend">שליחה</button>`);
     return `<a class="back" href="#/client">חזרה לאתר</a>
-      <section class="page-banner" data-photo-bg="0.66"><img src="${IMG(c.courseImage)}" alt=""><div><span class="eyebrow light">כל שבוע, אותה קבוצה</span><h1 class="display">${esc(c.courseTitle)}</h1><p>${esc(c.courseText)} מחיר הכרטיסייה: ${money(S.settings.cardPrice)}, כולל מע"מ.</p></div></section>
+      <section class="page-banner" data-photo-bg="0.66"><img src="${IMG(c.courseImage)}" alt=""><div><span class="eyebrow light">כל שבוע, אותה קבוצה</span><h1 class="display">${esc(c.courseTitle)}</h1><p>${esc(c.courseText)} מחיר הכרטיסייה: ${money(S.settings.cardPrice)}, כולל מע"מ. התחייבות לשלושה חודשים לפחות, <a href="#/client/terms" class="light-link">פרטים בתקנון</a>.</p></div></section>
       <div class="course-grid"><div>${card(`<h2>הקבוצות</h2>${groupsHtml}`)}</div><div>${form}</div></div>`;
   }
 

@@ -1288,3 +1288,6 @@ ul.cal-legend { list-style: none; padding: 0; margin: 12px 0 0; }
 .site-foot .foot-biz { max-width: 1120px; margin: 20px auto 0; font-size: .85rem; color: #eadccf; line-height: 1.7; }
 .site-foot .foot-biz a { color: #fff; }
 .site-foot .foot-links { flex-wrap: wrap; row-gap: 8px; }
+
+/* קישור בתוך באנר כהה (עמוד הקורס) */
+.page-banner a.light-link { color: #fff; text-decoration: underline; }
